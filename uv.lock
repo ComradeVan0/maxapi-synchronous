@@ -679,7 +679,6 @@ dependencies = [
     { name = "puremagic" },
     { name = "pydantic" },
     { name = "requests" },
-    { name = "types-requests" },
 ]
 
 [package.dev-dependencies]
@@ -698,6 +697,7 @@ dev = [
     { name = "python-dotenv" },
     { name = "responses" },
     { name = "ruff" },
+    { name = "types-requests" },
 ]
 
 [package.metadata]
@@ -707,7 +707,6 @@ requires-dist = [
     { name = "puremagic", specifier = ">=1.30,<2" },
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "requests", specifier = ">=2.31.0,<3" },
-    { name = "types-requests", specifier = ">=2.33.0.20260712" },
 ]
 
 [package.metadata.requires-dev]
@@ -726,6 +725,7 @@ dev = [
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "responses", specifier = ">=0.25.0" },
     { name = "ruff", specifier = ">=0.15" },
+    { name = "types-requests", specifier = ">=2.33.0.20260712" },
 ]
 
 [[package]]
