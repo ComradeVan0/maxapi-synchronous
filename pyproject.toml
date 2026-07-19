@@ -55,6 +55,7 @@ dev = [
     "python-dotenv>=1.2.1",
     "Faker>=40.4.0",
     "responses>=0.25.0",
+    "libcst>=1.0,<2",
 ]
 
 [tool.uv]
@@ -150,6 +151,9 @@ flake8-type-checking.runtime-evaluated-base-classes = [
     "S",
     "T20",
     "FBT",
+]
+"tools/async_to_sync.py" = [
+    "T201", # CLI tool — printing to stdout is intentional
 ]
 "maxapi/methods/send_message.py" = [
     "C90", # TODO: требует рефакторинга

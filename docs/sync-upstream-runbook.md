@@ -3,8 +3,8 @@
 **Форк:** https://github.com/ComradeVan0/maxapi-synchronous (ветка `main`, sync)
 **Upstream:** https://github.com/love-apples/maxapi (ветка `main`, async)
 
-> Дизайн процесса (почему так, категории файлов, спецификация codemod) — в `docs/sync-upstream-design.md`.
-> Здесь — **как выполнять** синхронизацию.
+> Здесь — **как выполнять** синхронизацию: шпаргалка конверсии, шаги, верификация, откат.
+> (Дизайн-обоснование и спецификация codemod — во внутренней спеке; она в репозиторий не входит.)
 
 ---
 
@@ -123,6 +123,11 @@ git grep -n "TODO(async2sync)"                # список ручной раб
 Для каждой функции — конверсия по шпаргалке (§1), проверить новую логику upstream,
 **удалить** строку-баннер после конверсии.
 Проверить, что новые upstream-импорты не тянут исключённые модули (`context`, `webhook` и др.).
+Проверить формы `asyncio`, которые codemod НЕ ловит (он рассчитывает на точечную запись `asyncio.X`; формы `from asyncio import X` и `import asyncio as aio` пропускают и конверсию, и детекцию):
+```bash
+git grep -nE "from asyncio import|import asyncio as" -- maxapi/ || echo "clean"
+```
+При находке — `gather`/`Lock`/`Event`/и т.п. из таких импортов убрать вручную, `sleep` → `time.sleep`.
 
 **Шаг 9. Верификация.**
 ```bash

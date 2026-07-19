@@ -1,0 +1,5 @@
+maxapi/connection/base.py
+maxapi/bot.py
+maxapi/types/shortcuts.py
+maxapi/types/chats.py
+maxapi/types/fetchable.py
