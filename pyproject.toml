@@ -19,6 +19,7 @@ dependencies = [
     "pydantic>=2,<3",
     "puremagic>=1.30,<2",
     "magic-filter>=1.0.12,<2",
+    "types-requests>=2.33.0.20260712",
 ]
 
 [project.urls]
