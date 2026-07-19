@@ -6,10 +6,11 @@ from ._compat import StrEnum
 @unique
 class ChatPermission(StrEnum):
     """
-    Права доступа пользователя в чате.
+    Права доступа пользователя или бота в чате или канале.
 
-    Используются для управления разрешениями при добавлении участников
-    или изменении настроек чата.
+    `add_remove_members` позволяет ботам добавлять и удалять участников
+    только в групповых чатах. Добавление подписчиков в канал через
+    `POST /chats/{chatId}/members` не поддерживается.
     """
 
     READ_ALL_MESSAGES = auto()
@@ -20,6 +21,9 @@ class ChatPermission(StrEnum):
     WRITE = auto()
     CAN_CALL = auto()
     EDIT_LINK = auto()
+    POST_EDIT_DELETE_MESSAGE = auto()
+    EDIT_MESSAGE = auto()
+    DELETE_MESSAGE = auto()
     EDIT = auto()
     DELETE = auto()
     VIEW_STATS = auto()

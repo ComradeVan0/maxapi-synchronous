@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import warnings
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .client.default import DefaultConnectionProperties
 from .connection.base import BaseConnection
@@ -615,6 +615,14 @@ class Bot(BaseConnection):
         Returns:
             Chat: Объект чата.
         """
+
+        warnings.warn(
+            "bot.get_chat_by_link() устарел и отсутствует в текущей "
+            "OpenAPI-спецификации API MAX. "
+            "Использование не рекомендуется.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         return GetChatByLink(bot=self, link=link).fetch()
 

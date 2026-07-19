@@ -5,8 +5,8 @@ DEFAULT_RETRY_STATUSES: tuple[int, ...] = (502, 503, 504)
 
 class DefaultConnectionProperties:
     """
-    Класс для хранения параметров соединения по умолчанию для
-    aiohttp-клиента.
+    Класс для хранения параметров соединения по умолчанию
+    HTTP-клиента (requests).
 
     Args:
         timeout: Таймаут запроса в секундах (по умолчанию 150).
@@ -22,8 +22,7 @@ class DefaultConnectionProperties:
             сохранены как есть.
 
     Attributes:
-        timeout: Экземпляр aiohttp.ClientTimeout
-            с заданными параметрами.
+        timeout: Таймаут запроса в секундах.
         max_retries: Максимальное количество повторных попыток.
         retry_on_statuses: HTTP-статусы для retry.
         retry_backoff_factor: Множитель задержки.

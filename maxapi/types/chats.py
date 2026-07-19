@@ -228,8 +228,6 @@ class Chat(
             ведется диалог. Может быть None.
         messages_count: Количество сообщений в чате.
             Может быть None.
-        chat_message_id: Идентификатор сообщения чата.
-            Может быть None.
         pinned_message: Закрепленное сообщение.
             Может быть None.
     """
@@ -248,7 +246,6 @@ class Chat(
     description: str | None = None
     dialog_with_user: User | None = None
     messages_count: int | None = None
-    chat_message_id: str | None = None
     pinned_message: Message | None = None
     _bot: Any | None = PrivateAttr(default=None)
 

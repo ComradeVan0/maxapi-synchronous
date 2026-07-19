@@ -15,6 +15,7 @@ import puremagic
 from requests import Response, Session
 from requests.exceptions import ConnectionError
 
+from ..client.ssl import RUSSIAN_TRUSTED_CA_BUNDLE
 from ..enums.api_path import ApiPath
 from ..exceptions.download_file import DownloadFileError
 from ..exceptions.max import InvalidToken, MaxApiError, MaxConnection
@@ -118,9 +119,15 @@ class BaseConnection(BotMixin):
         self.api_url = url
 
     def _get_session(self) -> Session:
-        """Возвращает активную HTTP-сессию, создавая при необходимости."""
+        """Возвращает активную HTTP-сессию, создавая при необходимости.
+
+        Свежесозданная сессия верифицируется через русский доверенный CA
+        (см. :mod:`maxapi.client.ssl`). Если сессия задана извне
+        (``self.session``), она используется как есть.
+        """
         if self.session is None:
             self.session = Session()
+            self.session.verify = str(RUSSIAN_TRUSTED_CA_BUNDLE)
         return self.session
 
     def request(
@@ -312,9 +319,7 @@ class BaseConnection(BotMixin):
         try:
             response = _do_fetch()
         except ConnectionError as e:
-            raise DownloadFileError(
-                f"Ошибка при скачивании файла: {e}"
-            ) from e
+            raise DownloadFileError(f"Ошибка при скачивании файла: {e}") from e
         except _RetryableServerError as e:
             raise DownloadFileError(
                 f"Ошибка при скачивании файла: HTTP {e.status}"
@@ -589,10 +594,9 @@ class BaseConnection(BotMixin):
 
             final_path = self._check_file_exists(dest / filename)
             with open(final_path, "wb") as f:
-                for chunk in self._fetch_content_stream(
-                    response, chunk_size=chunk_size
-                ):
-                    f.write(chunk)
+                f.writelines(
+                    self._fetch_content_stream(response, chunk_size=chunk_size)
+                )
         except Exception:
             # При любой ошибке удаляем частично записанный файл.
             if final_path and final_path.exists():
