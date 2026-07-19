@@ -1,6 +1,35 @@
+# Файлы/директории для PRUNE одной командой после merge.
+# Это всё, что есть в upstream, но НЕ нужно sync-форку (async-специфичные части
+# и тесты удалённых подсистем). Список получен через:
+#   comm -23 <(git ls-tree -r --name-only upstream/main -- maxapi tests | sort) \
+#            <(git ls-tree -r --name-only HEAD -- maxapi tests | sort)
+# Команда prune (см. runbook Шаг 3):
+#   grep -vE '^#|^$' tools/excluded.txt | xargs git rm -r --ignore-unmatch
+
+# --- maxapi/: async-ядро диспетчерской машины + зависимые новые файлы ---
 maxapi/context
 maxapi/webhook
+maxapi/dispatcher.py
 maxapi/exceptions/dispatcher.py
 maxapi/filters/handler.py
 maxapi/filters/middleware.py
+maxapi/filters/state.py
+maxapi/filters/exception_type.py
+maxapi/types/error_event.py
 maxapi/utils/commands.py
+
+# --- tests/: тесты удалённых подсистем (dispatcher/context/webhook/middleware/handler/routers) ---
+tests/test_context.py
+tests/test_dispatcher.py
+tests/test_dispatcher_register_handlers.py
+tests/test_errors.py
+tests/test_handler_extra.py
+tests/test_middleware.py
+tests/test_nested_routers.py
+tests/test_webhook
+tests/test_utils/test_commands.py
+
+# --- tests/: async-тесты РЕАЛЬНЫХ фич (можно конвертировать в sync для покрытия;
+#     пока prun'ятся как redundant — убрать из списка при конверсии) ---
+tests/test_filters.py
+tests/test_patch_coverage_regression.py
