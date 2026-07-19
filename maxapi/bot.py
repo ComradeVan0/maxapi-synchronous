@@ -616,6 +616,14 @@ class Bot(BaseConnection):
             Chat: Объект чата.
         """
 
+        warnings.warn(
+            "bot.get_chat_by_link() устарел и отсутствует в текущей "
+            "OpenAPI-спецификации API MAX. "
+            "Использование не рекомендуется.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         return GetChatByLink(bot=self, link=link).fetch()
 
     def get_chat_by_id(self, id: int) -> Chat:

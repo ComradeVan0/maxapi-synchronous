@@ -116,6 +116,7 @@ nav:
     - Channel_post: filters/channel_post.md
     - Contact: filters/contact.md
     - Command: filters/command.md
+    - Exception_type: filters/exception_type.md
     - Filter: filters/filter.md
     - Handler: filters/handler.md
     - Middleware: filters/middleware.md
@@ -231,6 +232,7 @@ nav:
       - User_added: types/updates/user_added.md
       - User_removed: types/updates/user_removed.md
   - Utils:
+    - Deep_linking: utils/deep_linking.md
     - Inline_keyboard: utils/inline_keyboard.md
     - Message: utils/message.md
     - Overview: utils/index.md

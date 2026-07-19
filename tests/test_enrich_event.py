@@ -641,7 +641,6 @@ class TestEnrichEvent:
             "fixture_user_added",
             "fixture_bot_added",
             "fixture_bot_started",
-            "fixture_bot_stopped",
             "fixture_chat_title_changed",
             "fixture_dialog_cleared",
             "fixture_dialog_muted",

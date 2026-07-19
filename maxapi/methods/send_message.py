@@ -10,6 +10,7 @@ from ..exceptions.max import MaxApiError
 from ..loggers import logger_bot
 from ..types.attachments import Attachments
 from ..types.attachments.attachment import Attachment
+from ..types.attachments.buttons.attachment_button import AttachmentButton
 from ..types.attachments.upload import AttachmentUpload
 from ..types.input_media import InputMedia, InputMediaBuffer
 from ..types.message import NewMessageLink
@@ -133,11 +134,8 @@ class SendMessage(BaseConnection):
 
         if self.attachments:
             for att in self.attachments:
-                if (
-                    isinstance(att, Attachment)
-                    and str(att.type) == "inline_keyboard"
-                    and hasattr(att.payload, "buttons")
-                    and not any(att.payload.buttons)
+                if isinstance(att, AttachmentButton) and not any(
+                    att.payload.buttons
                 ):
                     continue
 
