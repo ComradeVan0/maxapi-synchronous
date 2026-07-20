@@ -445,6 +445,10 @@ class Bot(BaseConnection):
         """
         Удаляет чат.
 
+        .. deprecated:: 1.1.0
+            Метод удалён из официальной swagger-спецификации API MAX.
+            Использование не рекомендуется.
+
         https://dev.max.ru/docs-api/methods/DELETE/chats/-chatId-
 
         Args:
@@ -453,6 +457,14 @@ class Bot(BaseConnection):
         Returns:
             DeletedChat: Результат удаления чата.
         """
+
+        warnings.warn(
+            "bot.delete_chat() устарел и отсутствует в официальной "
+            "swagger-спецификации API MAX. "
+            "Использование не рекомендуется.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         return DeleteChat(
             bot=self,
@@ -465,19 +477,23 @@ class Bot(BaseConnection):
         message_ids: list[str] | None = None,
         from_time: datetime | int | None = None,
         to_time: datetime | int | None = None,
-        count: int = 50,
+        count: int | None = 50,
     ) -> Messages:
         """
-        Получает сообщения из чата.
+        Получает сообщения из чата или по списку идентификаторов.
+
+        Нужно передать ровно один из параметров: `chat_id`
+        или `message_ids`.
 
         https://dev.max.ru/docs-api/methods/GET/messages
 
         Args:
-            chat_id: ID чата.
-            message_ids: ID сообщений.
+            chat_id: ID чата, из которого нужно получить сообщения.
+            message_ids: ID сообщений, которые нужно получить.
             from_time: Начало периода.
             to_time: Конец периода.
-            count: Количество сообщений.
+            count: Количество сообщений. Если None, параметр
+                не отправляется.
 
         Returns:
             Messages: Список сообщений.
@@ -589,6 +605,11 @@ class Bot(BaseConnection):
         """
         Получает список чатов бота.
 
+        .. deprecated:: 1.1.0
+            Начиная с июня 2026 года метод ``GET /chats`` больше не
+            поддерживается. API не предоставляет готового способа получить
+            список групповых чатов и каналов, в которые добавлен бот.
+
         https://dev.max.ru/docs-api/methods/GET/chats
 
         Args:
@@ -600,6 +621,15 @@ class Bot(BaseConnection):
         Returns:
             Chats: Список чатов.
         """
+
+        warnings.warn(
+            "bot.get_chats() устарел: начиная с июня 2026 года "
+            "GET /chats больше не поддерживается. API не предоставляет "
+            "готового способа получить список групповых чатов и каналов, "
+            "в которые добавлен бот.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         return GetChats(bot=self, count=count, marker=marker).fetch()
 
@@ -836,25 +866,32 @@ class Bot(BaseConnection):
         marker: int | None = None,
     ) -> AddedListAdminChat:
         """
-        Добавляет администраторов в чат.
+        Назначает администраторов чата или канала.
 
         https://dev.max.ru/docs-api/methods/POST/chats/-chatId-/members/admins
 
         Args:
             chat_id: ID чата.
             admins: Список администраторов.
-            marker: Указатель на следующую страницу данных.
-                По умолчанию None.
+            marker: Устаревший параметр, больше не отправляется в API.
 
         Returns:
             AddedListAdminChat: Результат добавления.
         """
 
+        if marker is not None:
+            warnings.warn(
+                "Параметр marker в bot.add_list_admin_chat() устарел "
+                "и игнорируется: POST /chats/{chatId}/members/admins "
+                "больше не поддерживает marker.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         return AddAdminChat(
             bot=self,
             chat_id=chat_id,
             admins=admins,
-            marker=marker,
         ).fetch()
 
     def remove_admin(self, chat_id: int, user_id: int) -> RemovedAdmin:
@@ -1057,7 +1094,8 @@ class Bot(BaseConnection):
         """
 
         warnings.warn(
-            "bot.change_info() устарел и отсутствует в официальной "
+            "bot.set_my_commands() устарел: реализован через "
+            "bot.change_info(), отсутствующий в официальной "
             "swagger-спецификации API MAX. "
             "Использование не рекомендуется.",
             DeprecationWarning,
