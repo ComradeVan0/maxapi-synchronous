@@ -3,6 +3,7 @@ from __future__ import annotations
 # нужен в рантайме: get_type_hints() не найдёт `builtins`,
 # если импорт только под TYPE_CHECKING
 import builtins  # noqa: TC003
+import warnings
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -176,10 +177,18 @@ class ChatAdminsManager(BotMixin):
         *,
         marker: int | None = None,
     ) -> AddedListAdminChat:
+        if marker is not None:
+            warnings.warn(
+                "Параметр marker в chat.admins.add() устарел и "
+                "игнорируется: POST /chats/{chatId}/members/admins "
+                "больше не поддерживает marker.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         return self._ensure_bot().add_list_admin_chat(
             chat_id=self.chat_id,
             admins=list(admins),
-            marker=marker,
         )
 
     def remove(self, user_id: int) -> RemovedAdmin:
@@ -399,7 +408,7 @@ class Chat(
         message_ids: list[str] | None = None,
         from_time: datetime | int | None = None,
         to_time: datetime | int | None = None,
-        count: int = 50,
+        count: int | None = 50,
     ) -> Messages:
         """Получить историю сообщений текущего чата."""
 

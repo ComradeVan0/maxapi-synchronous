@@ -3,7 +3,7 @@
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from maxapi.bot import Bot
@@ -209,7 +209,7 @@ class TestDownloadFile:
     def test_download_file_no_content_disposition(
         self, bot: Bot, tmp_dir: Path, mock_session: MagicMock
     ):
-        """Без Content-Disposition имя генерируется по MIME: file.ext."""
+        """Без Content-Disposition имя берётся из URL + MIME: img.jpg."""
         url = "https://example.com/img"
         mock_response = _make_mock_response(
             url=url,
@@ -219,7 +219,7 @@ class TestDownloadFile:
         mock_session.get = MagicMock(return_value=mock_response)
 
         result = bot.download_file(url=url, destination=tmp_dir)
-        assert result.name.startswith("file")
+        assert result.name == "img.jpg"
         assert result.parent == tmp_dir
 
     @freeze_datetime("maxapi.connection.base", "2026-04-16 10:30:50")
@@ -552,9 +552,7 @@ class TestDownloadFile:
                 filename=filename,
             )
 
-            assert result.resolve() == (
-                Path(destination) / filename
-            ).resolve()
+            assert result.resolve() == (Path(destination) / filename).resolve()
             assert result.read_bytes() == b"".join(chunks)
             assert result.exists()
         finally:
@@ -572,9 +570,7 @@ class TestDownloadFileAsBytes:
       https://i.oneme.ru/i?r=BTGBPUwtwgYUeoFhO7rESmr81n-DnwjHYFhx5_EAhKk...
     """
 
-    def test_download_bytes_success(
-        self, bot: Bot, mock_session: MagicMock
-    ):
+    def test_download_bytes_success(self, bot: Bot, mock_session: MagicMock):
         """Успешное скачивание файла в память."""
         chunks = [b"chunk1", b"chunk2", b"chunk3"]
         mock_response = _make_mock_response(
@@ -589,9 +585,7 @@ class TestDownloadFileAsBytes:
 
         assert result == b"chunk1chunk2chunk3"
 
-    def test_download_bytes_image_url(
-        self, bot: Bot, mock_session: MagicMock
-    ):
+    def test_download_bytes_image_url(self, bot: Bot, mock_session: MagicMock):
         """Скачивание изображения с i.oneme.ru."""
         png_header = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
 
@@ -622,9 +616,7 @@ class TestDownloadFileAsBytes:
         self, bot: Bot, mock_session: MagicMock
     ):
         """DownloadFileError при ошибке соединения."""
-        mock_session.get = MagicMock(
-            side_effect=ConnectionError("timeout")
-        )
+        mock_session.get = MagicMock(side_effect=ConnectionError("timeout"))
         bot.default_connection.max_retries = 0
 
         url = "https://example.com/file"

@@ -1,8 +1,12 @@
-"""Тесты SSL-настроек requests-клиента (русский доверенный CA)."""
+"""Тесты SSL-настроек requests-клиента (системное хранилище + русский CA)."""
 
 from __future__ import annotations
 
-from maxapi.client.ssl import RUSSIAN_TRUSTED_CA_BUNDLE
+from maxapi.client.ssl import (
+    RUSSIAN_TRUSTED_CA_BUNDLE,
+    SSLAdapter,
+    create_default_ssl_context,
+)
 from maxapi.connection.base import BaseConnection
 
 
@@ -11,16 +15,22 @@ def test_russian_trusted_ca_bundle_exists():
     assert RUSSIAN_TRUSTED_CA_BUNDLE.is_file()
 
 
-def test_session_uses_russian_trusted_ca():
-    """Свежесозданная сессия верифицируется через русский доверенный CA."""
+def test_ssl_context_loads_ca():
+    """SSL-контекст (system + русский CA) создаётся и грузит CA."""
+    ctx = create_default_ssl_context()
+    assert ctx.get_ca_certs()  # системные + pem
+
+
+def test_session_mounts_ssl_adapter():
+    """Свежесозданная сессия использует SSLAdapter для https."""
     conn = BaseConnection()
     session = conn._get_session()
-    assert session.verify == str(RUSSIAN_TRUSTED_CA_BUNDLE)
+    adapter = session.get_adapter("https://example.com")
+    assert isinstance(adapter, SSLAdapter)
 
 
 def test_external_session_not_overridden():
-    """Сессия, заданная извне, не получает принудительный verify."""
+    """Сессия, заданная извне, не получает принудительный adapter."""
     conn = BaseConnection()
-    custom = type(conn.session or object())()  # любой объект-заглушка
-    conn.session = custom
-    assert conn._get_session() is custom
+    conn.session = object()
+    assert conn._get_session() is conn.session

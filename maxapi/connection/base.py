@@ -15,7 +15,7 @@ import puremagic
 from requests import Response, Session
 from requests.exceptions import ConnectionError
 
-from ..client.ssl import RUSSIAN_TRUSTED_CA_BUNDLE
+from ..client.ssl import SSLAdapter
 from ..enums.api_path import ApiPath
 from ..exceptions.download_file import DownloadFileError
 from ..exceptions.max import InvalidToken, MaxApiError, MaxConnection
@@ -88,7 +88,7 @@ class BaseConnection(BotMixin):
     HTTP-запроса, обработка ответа).
     """
 
-    API_URL = "https://platform-api.max.ru"
+    API_URL = "https://platform-api2.max.ru"
     RETRY_DELAY = 2
     ATTEMPTS_COUNT = 5
     AFTER_MEDIA_INPUT_DELAY = 2.0
@@ -121,13 +121,13 @@ class BaseConnection(BotMixin):
     def _get_session(self) -> Session:
         """Возвращает активную HTTP-сессию, создавая при необходимости.
 
-        Свежесозданная сессия верифицируется через русский доверенный CA
-        (см. :mod:`maxapi.client.ssl`). Если сессия задана извне
-        (``self.session``), она используется как есть.
+        Свежесозданная сессия использует :class:`maxapi.client.ssl.SSLAdapter`
+        (системное хранилище + русский доверенный CA). Если сессия задана
+        извне (``self.session``), она используется как есть.
         """
         if self.session is None:
             self.session = Session()
-            self.session.verify = str(RUSSIAN_TRUSTED_CA_BUNDLE)
+            self.session.mount("https://", SSLAdapter())
         return self.session
 
     def request(
@@ -419,6 +419,24 @@ class BaseConnection(BotMixin):
                         break
                 if filename:
                     ext = Path(filename).suffix
+            else:
+                # Нет Content-Disposition — fallback на имя из URL (PR #112).
+                url_str = str(response.url) if response.url else ""
+                if url_str.startswith(("http://", "https://")):
+                    parsed = urlparse(url_str)
+                    url_name = Path(parsed.path).name
+                    if url_name:
+                        filename = url_name
+                        ext = Path(filename).suffix
+                        if not ext:
+                            content_type = response.headers.get(
+                                "Content-Type", ""
+                            )
+                            if content_type:
+                                g_ext = mimetypes.guess_extension(content_type)
+                                if g_ext:
+                                    ext = g_ext
+                                    filename = f"{filename}{ext}"
 
             # Серверы Max возвращают имя файла дважды закодированным.
             if filename and re.search(r"%[0-9A-Fa-f]{2}", filename):

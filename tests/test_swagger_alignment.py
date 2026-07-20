@@ -319,6 +319,15 @@ def test_bot_get_chat_by_link_warns_about_deprecation(bot):
     mocked_fetch.assert_called_once_with()
 
 
+def test_set_my_commands_warns_about_deprecation(bot):
+    """Варнит о set_my_commands, не copy-paste из change_info."""
+    with (
+        patch("maxapi.bot.ChangeInfo"),
+        pytest.warns(DeprecationWarning, match="set_my_commands"),
+    ):
+        bot.set_my_commands()
+
+
 def test_contact_payload_accepts_hash_and_nullable_vcf():
     payload = ContactAttachmentPayload.model_validate(
         {"vcf_info": None, "hash": "contact-hash", "max_info": None}
