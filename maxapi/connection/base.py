@@ -15,7 +15,7 @@ import puremagic
 from requests import Response, Session
 from requests.exceptions import ConnectionError
 
-from ..client.ssl import RUSSIAN_TRUSTED_CA_BUNDLE
+from ..client.ssl import SSLAdapter
 from ..enums.api_path import ApiPath
 from ..exceptions.download_file import DownloadFileError
 from ..exceptions.max import InvalidToken, MaxApiError, MaxConnection
@@ -121,13 +121,13 @@ class BaseConnection(BotMixin):
     def _get_session(self) -> Session:
         """Возвращает активную HTTP-сессию, создавая при необходимости.
 
-        Свежесозданная сессия верифицируется через русский доверенный CA
-        (см. :mod:`maxapi.client.ssl`). Если сессия задана извне
-        (``self.session``), она используется как есть.
+        Свежесозданная сессия использует :class:`maxapi.client.ssl.SSLAdapter`
+        (системное хранилище + русский доверенный CA). Если сессия задана
+        извне (``self.session``), она используется как есть.
         """
         if self.session is None:
             self.session = Session()
-            self.session.verify = str(RUSSIAN_TRUSTED_CA_BUNDLE)
+            self.session.mount("https://", SSLAdapter())
         return self.session
 
     def request(
