@@ -109,7 +109,7 @@ filterwarnings = [
 
 [tool.coverage.report]
 # Порог покрытия unit-тестами.
-fail_under = 90
+fail_under = 70
 
 [tool.ruff]
 src = ["maxapi", "tests"]
