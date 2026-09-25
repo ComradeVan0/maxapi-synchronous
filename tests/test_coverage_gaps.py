@@ -402,6 +402,7 @@ class TestBaseConnectionUploadFallback:
         bot.session = None  # force the else-branch
 
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.text = '{"token":"abc"}'
 
         mock_session_instance = Mock()
@@ -437,6 +438,7 @@ class TestBaseConnectionUploadFallback:
         some_buffer = b"\x00" * 32
 
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.text = '{"token":"xyz"}'
 
         # Устанавливаем сессию на экземпляр BaseConnection (conn),
@@ -484,6 +486,7 @@ class TestBaseConnectionUploadFallback:
         some_buffer = b"\x00" * 32
 
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.text = '{"token":"buf"}'
 
         mock_session_instance = Mock()

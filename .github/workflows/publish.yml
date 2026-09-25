@@ -7,110 +7,266 @@ on:
       - 'pyproject.toml'
   workflow_dispatch:
 
+# Дефолт для check-version и вызываемых гейтов; job `publish` ниже
+# переопределяет его своим блоком permissions.
+# Вызываемые workflow не могут запросить больше прав, чем задано тут.
+permissions:
+  contents: read
+
 jobs:
   check-version:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # tomllib есть с 3.11; .python-version в репозитории задаёт 3.10.
+      UV_PYTHON: "3.11"
     outputs:
       version: ${{ steps.version.outputs.version }}
-      changed: ${{ steps.changed.outputs.changed }}
+      prerelease: ${{ steps.pypi.outputs.prerelease }}
+      should_release: >-
+        ${{ github.ref == 'refs/heads/main'
+        && steps.pypi.outputs.published == 'false' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
-          fetch-depth: 0  # Нужна полная история для сравнения
+          persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
         with:
-          python-version: "3.11"
+          version: "latest-known"
+          enable-cache: false
 
       - name: Get current version
         id: version
         run: |
-          python -c "import tomllib; f = open('pyproject.toml', 'rb'); data = tomllib.load(f); print(data['project']['version'])" > /tmp/current_version.txt
-          VERSION=$(cat /tmp/current_version.txt)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
+          uv run --no-project python - <<'PY'
+          import os
+          import tomllib
 
-      - name: Check if version changed
-        id: changed
+          with open("pyproject.toml", "rb") as fp:
+              project = tomllib.load(fp)["project"]
+
+          name = project["name"]
+          version = project["version"]
+          print(f"Package: {name} {version}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"name={name}\n")
+              out.write(f"version={version}\n")
+          PY
+
+      # Источник истины — PyPI, а не diff с предыдущим коммитом:
+      # bump версии может приехать не последним коммитом в push,
+      # а workflow_dispatch остаётся идемпотентным. Эндпоинт
+      # /pypi/{name}/{version}/json сам сопоставляет версии по
+      # PEP 440 (1.2.2 == 1.2.2.0, 1.2.2-1 == 1.2.2.post1 — бэкенд
+      # нормализует версию при сборке) и не тянет весь блоб релизов.
+      - name: Check if version is published on PyPI
+        id: pypi
+        env:
+          PACKAGE_NAME: ${{ steps.version.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          CURRENT_VERSION=$(cat /tmp/current_version.txt)
+          # packaging — эталонная реализация PEP 440: валидация версии и
+          # признак пререлиза (1.3.0c1, 1.3.0pre1, 1.3.0rc1.post1 и т.п.).
+          uv run --no-project --with "packaging>=24" python - <<'PY'
+          import os
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
 
-          # Получаем версию из предыдущего коммита
-          PREVIOUS_VERSION=$(git show HEAD~1:pyproject.toml 2>/dev/null | python -c "import sys, tomllib; data = tomllib.load(sys.stdin.buffer); print(data['project']['version'])" 2>/dev/null || echo "")
+          from packaging.version import InvalidVersion, Version
 
-          if [ -z "$PREVIOUS_VERSION" ]; then
-            # Если нет предыдущей версии, проверяем изменения в файле
-            if git diff --quiet HEAD~1 HEAD -- pyproject.toml 2>/dev/null; then
-              echo "changed=false" >> $GITHUB_OUTPUT
-              echo "No changes in pyproject.toml"
-            else
-              echo "changed=true" >> $GITHUB_OUTPUT
-              echo "pyproject.toml changed (first publish or version file modified)"
-            fi
-          elif [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
-          else
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "Version not changed: $CURRENT_VERSION"
-          fi
+          name = os.environ["PACKAGE_NAME"]
+          version = os.environ["PACKAGE_VERSION"]
+          try:
+              parsed = Version(version)
+          except InvalidVersion:
+              sys.exit(f"Версия {version!r} не соответствует PEP 440")
+          url = f"https://pypi.org/pypi/{name}/{version}/json"
+          request = urllib.request.Request(
+              url, headers={"User-Agent": "maxapi-ci"}
+          )
+
+          published = None
+          for delay in (1, 2, 4):
+              try:
+                  with urllib.request.urlopen(request, timeout=30):
+                      published = True
+                  break
+              except urllib.error.HTTPError as exc:
+                  if exc.code == 404:
+                      # 404 и у новой версии, и у нового пакета.
+                      published = False
+                      break
+                  reason = f"HTTP {exc.code}"
+              except Exception as exc:
+                  reason = repr(exc)
+              print(f"PyPI не ответил ({reason}), ждём {delay} с")
+              time.sleep(delay)
+
+          if published is None:
+              # Fail-closed: одиночный 502 или таймаут гасится
+              # ретраями, стабильный сбой не даёт молча пропустить
+              # проверку и покрасить push в main без релиза.
+              sys.exit(f"Не удалось опросить PyPI: {url}")
+
+          if published:
+              print(f"Версия {version} уже опубликована, релиз не нужен")
+          else:
+              print(f"Версия {version} на PyPI отсутствует, публикуем")
+
+          # Пререлиз (a/b/rc/dev, включая их пост-релизы) помечает
+          # GitHub Release, чтобы «Latest» остался на стабильной версии.
+          prerelease = parsed.is_prerelease
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"published={str(published).lower()}\n")
+              out.write(f"prerelease={str(prerelease).lower()}\n")
+          PY
+
+  # Гейты вызываются отсюда, а не отдельными workflow: проверки идут на
+  # публикуемом SHA и в одной цепочке `needs` с publish. Дефолтная
+  # семантика `needs` (без `always()`) не даст publish стартовать, если
+  # любой гейт упал или был пропущен. Единое условие `should_release`
+  # не гоняет гейты на push в main без нового релиза и разрешает запуск
+  # только с main (иначе publish с любой ветки).
+  lint:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    uses: ./.github/workflows/lint.yml
+
+  mypy:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    uses: ./.github/workflows/mypy.yml
+
+  package:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    uses: ./.github/workflows/package.yml
+
+  # Секреты — явно, не `secrets: inherit`: только то, что нужно тестам.
+  tests:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    uses: ./.github/workflows/tests.yml
+    secrets:
+      MAX_BOT_TOKEN: ${{ secrets.MAX_BOT_TOKEN }}
+      TEST_CHAT_ID: ${{ secrets.TEST_CHAT_ID }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   publish:
-    needs: check-version
-    if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [check-version, lint, mypy, tests, package]
+    if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
-      contents: write  # Для создания GitHub Release
+      contents: write  # Тег и GitHub Release через API
       id-token: write  # Для Trusted Publishing на PyPI
 
+    # Checkout не нужен: dist приходит артефактом, тег и release
+    # создаются через API. В job с правом публикации нет ни исходников,
+    # ни сохранённого в .git/config токена.
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      # Пакет не пересобираем: на PyPI уходит ровно тот dist, который
+      # гейт `package` проверил twine и check-wheel-contents.
+      - name: Download dist artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
 
+      # Python не ставим: uv сам управляет интерпретатором, а
+      # `uv publish` его вообще не требует. Кеш в релизном job не
+      # используем (zizmor cache-poisoning): восстановленный из кеша
+      # артефакт рядом с необратимой публикацией — лишний риск.
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10.0.1
         with:
-          version: "latest"
+          version: "latest-known"
+          enable-cache: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install build dependencies
+      - name: Print dist hashes
         run: |
-          uv sync --all-groups
+          hashes=$(sha256sum dist/*)
+          echo "$hashes"
+          {
+            echo "### Публикуемые файлы"
+            echo '```'
+            echo "$hashes"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build package
-        run: |
-          uv build
-
+      # `--check-url` даёт идемпотентность: если тег или release упали
+      # после загрузки, повторный запуск сверит хеши с PyPI и пропустит
+      # уже залитые файлы, а не свалится на 400 «File already exists».
+      # `--check-url` принимает URL индекса, имя пакета uv дописывает сам.
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
-          print-hash: true
-
-      - name: Create and push git tag
         run: |
-          TAG="v${{ needs.check-version.outputs.version }}"
+          uv publish --trusted-publishing always \
+            --check-url https://pypi.org/simple/ dist/*
 
-          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "refs/tags/$TAG$"; then
-            echo "Tag $TAG already exists on origin, skipping tag creation and push."
+      - name: Create git tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          TAG="v$VERSION"
+
+          # 404 — тега нет, создаём; любая другая ошибка API — падаем.
+          # Существующий тег обязан указывать на публикуемый коммит:
+          # иначе release получит исходники не того кода, что ушёл на PyPI.
+          if out=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" 2>&1); then
+            sha=$(jq -r '.object.sha' <<<"$out")
+            if [ "$(jq -r '.object.type' <<<"$out")" = "tag" ]; then
+              sha=$(gh api "repos/$GH_REPO/git/tags/$sha" --jq '.object.sha')
+            fi
+            if [ "$sha" != "$GITHUB_SHA" ]; then
+              echo "Tag $TAG points to $sha, expected $GITHUB_SHA" >&2
+              exit 1
+            fi
+            echo "Tag $TAG already exists at $GITHUB_SHA, skipping."
             exit 0
+          elif ! grep -q "HTTP 404" <<<"$out"; then
+            echo "$out" >&2
+            exit 1
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$TAG"
-          git push origin "$TAG"
+          gh api "repos/$GH_REPO/git/refs" \
+            -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
+          echo "Tag $TAG created at $GITHUB_SHA"
 
+      # `gh` предустановлен на runner: сторонний экшен с contents: write
+      # в релизном job не нужен. Повторный запуск пропускает существующий
+      # release, как и шаг с тегом выше.
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.check-version.outputs.version }}
-          name: v${{ needs.check-version.outputs.version }}
-          generate_release_notes: true
-          files: dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+          PRERELEASE: ${{ needs.check-version.outputs.prerelease }}
+        run: |
+          TAG="v$VERSION"
+
+          # Release уже есть (повторный запуск после сбоя): дозаливаем
+          # ассеты, --clobber делает шаг идемпотентным. 404 — release
+          # нет, создаём; любая другая ошибка API — падаем.
+          if out=$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>&1); then
+            echo "Release $TAG already exists, re-uploading assets."
+            gh release upload "$TAG" dist/* --clobber
+            exit 0
+          elif ! grep -q "HTTP 404" <<<"$out"; then
+            echo "$out" >&2
+            exit 1
+          fi
+
+          args=(--title "$TAG" --generate-notes --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$TAG" "${args[@]}" dist/*

@@ -1,0 +1,139 @@
+"""Тесты метода SetCommands (PATCH /me/commands)."""
+
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
+from maxapi.connection.base import BaseConnection
+from maxapi.enums.api_path import ApiPath
+from maxapi.enums.http_method import HTTPMethod
+from maxapi.methods.change_info import ChangeInfo
+from maxapi.methods.set_commands import SetCommands
+from maxapi.methods.types.setted_commands import SettedCommands
+from maxapi.types.command import BotCommand
+
+
+def test_set_commands_fetch_sends_patch_to_me_commands(bot):
+    """Запрос уходит методом PATCH на /me/commands."""
+    method = SetCommands(
+        bot=bot,
+        commands=[BotCommand(name="/start", description="Запуск")],
+    )
+
+    with patch.object(
+        BaseConnection, "request", new=MagicMock(return_value=Mock())
+    ) as mocked_request:
+        method.fetch()
+
+    kwargs = mocked_request.call_args.kwargs
+    assert kwargs["method"] == HTTPMethod.PATCH
+    assert kwargs["path"] == "/me/commands"
+    assert kwargs["json"] == {
+        "commands": [{"name": "/start", "description": "Запуск"}]
+    }
+
+
+def test_set_commands_fetch_skips_empty_description(bot):
+    """Команда без описания уходит без ключа description."""
+    method = SetCommands(bot=bot, commands=[BotCommand(name="/start")])
+
+    with patch.object(
+        BaseConnection, "request", new=MagicMock(return_value=Mock())
+    ) as mocked_request:
+        method.fetch()
+
+    assert mocked_request.call_args.kwargs["json"] == {
+        "commands": [{"name": "/start"}]
+    }
+
+
+def test_set_commands_fetch_sends_empty_list_to_delete(bot):
+    """Пустой список команд уходит как есть и удаляет все команды."""
+    method = SetCommands(bot=bot, commands=[])
+
+    with patch.object(
+        BaseConnection, "request", new=MagicMock(return_value=Mock())
+    ) as mocked_request:
+        method.fetch()
+
+    assert mocked_request.call_args.kwargs["json"] == {"commands": []}
+
+
+def test_set_commands_rejects_more_than_32_commands(bot):
+    """Больше 32 команд API не принимает — проверяем до запроса."""
+    commands = [BotCommand(name=f"/cmd{i}") for i in range(33)]
+
+    with pytest.raises(ValueError, match="32"):
+        SetCommands(bot=bot, commands=commands)
+
+
+def test_bot_set_commands_returns_model(bot):
+    """bot.set_commands проксирует вызов и возвращает модель ответа."""
+    expected = SettedCommands(commands=[BotCommand(name="/start")])
+
+    with patch.object(
+        BaseConnection, "request", new=MagicMock(return_value=expected)
+    ) as mocked_request:
+        result = bot.set_commands(BotCommand(name="/start"))
+
+    assert result is expected
+    assert mocked_request.call_args.kwargs["path"] == "/me/commands"
+
+
+def test_bot_set_commands_without_arguments_clears_commands(bot):
+    """Вызов без аргументов отправляет пустой список команд."""
+    with patch.object(
+        BaseConnection, "request", new=MagicMock(return_value=Mock())
+    ) as mocked_request:
+        bot.set_commands()
+
+    assert mocked_request.call_args.kwargs["json"] == {"commands": []}
+
+
+def test_bot_set_my_commands_is_deprecated(bot):
+    """Старый метод предупреждает об отключении PATCH /me."""
+    with (
+        patch.object(
+            BaseConnection, "request", new=MagicMock(return_value=Mock())
+        ) as mocked_request,
+        pytest.deprecated_call(match="set_commands"),
+    ):
+        bot.set_my_commands(BotCommand(name="/start"))
+
+    assert mocked_request.call_args.kwargs["path"] == ApiPath.ME
+
+
+def test_change_info_empty_commands_clears_them(bot):
+    """Пустой список команд уходит в тело запроса, а не отбрасывается."""
+    with pytest.deprecated_call(match="ChangeInfo"):
+        method = ChangeInfo(bot=bot, commands=[])
+
+    with patch.object(
+        BaseConnection, "request", new=MagicMock(return_value=Mock())
+    ) as mocked_request:
+        method.fetch()
+
+    assert mocked_request.call_args.kwargs["json"] == {"commands": []}
+
+
+def test_change_info_without_params_raises(bot):
+    """Без единого параметра запрос по-прежнему отклоняется."""
+    with (
+        pytest.deprecated_call(match="ChangeInfo"),
+        pytest.raises(ValueError, match="хотя бы один параметр"),
+    ):
+        ChangeInfo(bot=bot)
+
+
+def test_bot_set_my_commands_without_args_clears_commands(bot):
+    """Вызов без аргументов очищает команды через PATCH /me."""
+    with (
+        patch.object(
+            BaseConnection, "request", new=MagicMock(return_value=Mock())
+        ) as mocked_request,
+        pytest.deprecated_call(match="set_commands"),
+    ):
+        bot.set_my_commands()
+
+    kwargs = mocked_request.call_args.kwargs
+    assert kwargs["path"] == ApiPath.ME
+    assert kwargs["json"] == {"commands": []}

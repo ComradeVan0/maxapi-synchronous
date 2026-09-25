@@ -1,5 +1,6 @@
 """Тесты retry-механизма для серверных ошибок (502, 503, 504)."""
 
+from json import dumps
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,6 +24,7 @@ def _make_response(status, *, ok=None, json_data=None):
     resp = MagicMock()
     resp.status_code = status
     resp.ok = ok if ok is not None else (200 <= status < 300)
+    resp.text = dumps(json_data) if json_data is not None else ""
     if json_data is not None:
         resp.json.return_value = json_data
     return resp

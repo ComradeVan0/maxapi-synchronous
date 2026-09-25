@@ -13,15 +13,21 @@ closes #132
 
 ```python
 admin_router = Router(router_id="admin")
-admin_router.middleware(BroadcastLockMiddleware())   # хочется: lock только когда broadcast реально начнётся
+admin_router.middleware(
+    BroadcastLockMiddleware()
+)  # хочется: lock только когда broadcast реально начнётся
+
 
 @admin_router.message_created(IsAdmin(), Command("broadcast"))
 async def handle_broadcast(event): ...
 
+
 fallback_router = Router(router_id="fallback")
+
 
 @fallback_router.message_created()
 async def handle_fallback(event): ...
+
 
 dp.include_routers(admin_router, fallback_router)
 ```
@@ -183,8 +189,8 @@ handler.mw_chain = accumulated_inner_middlewares + handler.middlewares → call_
 ### 1. `Dispatcher.__init__` — переименование и новый атрибут
 
 ```python
-self.outer_middlewares: list[BaseMiddleware] = []   # было: self.middlewares
-self.inner_middlewares: list[BaseMiddleware] = []   # новый
+self.outer_middlewares: list[BaseMiddleware] = []  # было: self.middlewares
+self.inner_middlewares: list[BaseMiddleware] = []  # новый
 ```
 
 Атрибут `middlewares` сохраняется как `@property`-алиас с
@@ -223,6 +229,7 @@ def register_outer_middleware(self, middleware: BaseMiddleware) -> None:
     """
     self.outer_middlewares.append(middleware)
 
+
 def register_inner_middleware(self, middleware: BaseMiddleware) -> None:
     """Inner middleware (после фильтров handler).
 
@@ -232,6 +239,7 @@ def register_inner_middleware(self, middleware: BaseMiddleware) -> None:
     handler»; на уровне Router — то же, но только для своих handlers.
     """
     self.inner_middlewares.append(middleware)
+
 
 def register_middleware(self, middleware: BaseMiddleware) -> None:
     """
@@ -266,7 +274,7 @@ def _iter_routers(
     self,
     routers,
     parent_middlewares=None,
-    parent_inner_middlewares=None,   # новый параметр
+    parent_inner_middlewares=None,  # новый параметр
     parent_filters=None,
     parent_base_filters=None,
     path=None,
@@ -280,12 +288,14 @@ def _iter_routers(
     if router is self:
         accumulated_inner_middlewares = inner_middlewares
     else:
-        accumulated_inner_middlewares = inner_middlewares + router.inner_middlewares
+        accumulated_inner_middlewares = (
+            inner_middlewares + router.inner_middlewares
+        )
 
     yield (
         router,
         accumulated_middlewares,
-        accumulated_inner_middlewares,   # ← новый 5-й элемент
+        accumulated_inner_middlewares,  # ← новый 5-й элемент
         accumulated_filters,
         accumulated_base_filters,
     )
@@ -317,17 +327,15 @@ def _prepare_handlers(self, bot: Bot) -> None:
             # Порядок: global inner → router inner (накопленный) → handler mw
             # Внешний слой — global, внутренний — handler.
             all_inner = (
-                global_inner_mw
-                + accumulated_inner_mw
-                + handler.middlewares
+                global_inner_mw + accumulated_inner_mw + handler.middlewares
             )
             handler.mw_chain = self.build_middleware_chain(
                 all_inner,
                 functools.partial(self.call_handler, handler),
             )
-            router.handlers_by_type.setdefault(
-                handler.update_type, []
-            ).append(handler)
+            router.handlers_by_type.setdefault(handler.update_type, []).append(
+                handler
+            )
 
     self._cached_router_entries = list(self._iter_unique_routers(self.routers))
 ```
@@ -402,7 +410,9 @@ fallback_router:
 Вся логика inner_middleware **выпекается при `__ready()`** в
 `_prepare_handlers`. В горячем пути (`handle()` → `_iter_and_dispatch_routers`
 → `_dispatch_to_router`) нет ни одного нового вычисления — `handler.mw_chain`
-уже содержит все слои.
+уже содержит все слои. Поздние регистрации (#216) кеш не ломают: они помечают
+индекс устаревшим, и цепочки пересобираются целиком при следующей перестройке
+— тоже вне горячего пути.
 
 Текущий кеш `_cached_router_entries` не меняет свою роль:
 он хранит `outer_middlewares` для построения router-level outer-chain.
@@ -457,9 +467,12 @@ fallback_router:
 ```python
 from maxapi import Router, Dispatcher, Bot
 from myapp.middleware import (
-    RequestIdMiddleware, LoggingMiddleware,
-    DbTransactionMiddleware, HandlerLatencyMetricMiddleware,
-    AdminAccessLogMiddleware, BroadcastLockMiddleware,
+    RequestIdMiddleware,
+    LoggingMiddleware,
+    DbTransactionMiddleware,
+    HandlerLatencyMetricMiddleware,
+    AdminAccessLogMiddleware,
+    BroadcastLockMiddleware,
 )
 from myapp.filters import IsAdmin
 from maxapi.filters import Command
@@ -470,14 +483,18 @@ dp = Dispatcher()
 # Срабатывает для каждого события, даже для тех, что в итоге будут
 # проигнорированы. Подходит всё, что должно «жить» в контексте
 # любого входящего апдейта.
-dp.register_outer_middleware(RequestIdMiddleware())   # request_id для трейсинга
-dp.register_outer_middleware(LoggingMiddleware())     # лог всех updates
+dp.register_outer_middleware(RequestIdMiddleware())  # request_id для трейсинга
+dp.register_outer_middleware(LoggingMiddleware())  # лог всех updates
 
 # ─── Глобальный inner ─────────────────────────────────────────────
 # Срабатывает только если какой-то handler реально будет выполнен.
 # Подходит то, что бессмысленно делать «вхолостую».
-dp.register_inner_middleware(DbTransactionMiddleware())          # транзакция только под handler
-dp.register_inner_middleware(HandlerLatencyMetricMiddleware())   # метрика времени handler
+dp.register_inner_middleware(
+    DbTransactionMiddleware()
+)  # транзакция только под handler
+dp.register_inner_middleware(
+    HandlerLatencyMetricMiddleware()
+)  # метрика времени handler
 
 admin_router = Router(router_id="admin")
 
@@ -493,8 +510,10 @@ admin_router.register_outer_middleware(AdminAccessLogMiddleware())
 # исключительно перед началом тяжёлой операции.
 admin_router.register_inner_middleware(BroadcastLockMiddleware())
 
+
 @admin_router.message_created(IsAdmin(), Command("broadcast"))
 async def broadcast(event): ...
+
 
 dp.include_routers(admin_router)
 ```
@@ -544,10 +563,14 @@ outer middleware и фильтры:
 
 ```python
 parent = Router(router_id="parent")
-parent.register_inner_middleware(DbTransactionMiddleware())   # на любой handler в parent + детях
+parent.register_inner_middleware(
+    DbTransactionMiddleware()  # на любой handler в parent + детях
+)
 
 child = Router(router_id="child")
-child.register_inner_middleware(ChildAuditMiddleware())       # только на handler внутри child
+child.register_inner_middleware(
+    ChildAuditMiddleware()  # только на handler внутри child
+)
 parent.include_routers(child)
 ```
 
@@ -583,9 +606,10 @@ handler.mw_chain = [DbTransactionMiddleware] + handler.middlewares → call_hand
 - **«Middleware только если хоть один роутер обработал событие»** — это
   ровно то, что закрывает `dp.register_inner_middleware(mw)`. Дополнительных
   костылей с `data["_is_handled"]` больше не нужно.
-- **Динамическая регистрация middleware после старта** — невозможна с
-  кешированием; требует явного `dp.stop_polling()` + повторного старта.
-  Это ограничение архитектуры, а не данного изменения.
+- **Динамическая регистрация middleware после старта** — работает
+  (см. #216): `register_outer_middleware()` / `register_inner_middleware()`
+  помечают индекс устаревшим, и он перестраивается перед следующей
+  диспетчеризацией. Перезапуск диспетчера не нужен.
 
 ---
 
@@ -600,10 +624,14 @@ handler.mw_chain = [DbTransactionMiddleware] + handler.middlewares → call_hand
 # aiogram
 router = Router()
 
-router.message.outer_middleware(LoggingMiddleware())   # outer для message-обзёрвера
-router.message.middleware(AuthMiddleware())            # inner для message-обзёрвера
+router.message.outer_middleware(
+    LoggingMiddleware()
+)  # outer для message-обзёрвера
+router.message.middleware(AuthMiddleware())  # inner для message-обзёрвера
 
-router.callback_query.middleware(RateLimitMiddleware())  # только для callback_query
+router.callback_query.middleware(
+    RateLimitMiddleware()
+)  # только для callback_query
 
 # Дополнительно: middleware на уровне Router.update — ловит ВСЕ типы
 router.update.outer_middleware(TracingMiddleware())
@@ -679,14 +707,26 @@ warning):
 
 ```python
 # Глобальный уровень
-dp.register_outer_middleware(LoggingMW())     # ✅ канонично: outer (для каждого события)
-dp.register_inner_middleware(MetricsMW())     # ✅ канонично: inner (только когда handler сработал)
-dp.middleware(SomeMW())              # ⚠️ DeprecationWarning → используйте .register_outer_middleware()
+dp.register_outer_middleware(
+    LoggingMW()
+)  # ✅ канонично: outer (для каждого события)
+dp.register_inner_middleware(
+    MetricsMW()
+)  # ✅ канонично: inner (только когда handler сработал)
+dp.middleware(
+    SomeMW()
+)  # ⚠️ DeprecationWarning → используйте .register_outer_middleware()
 
 # Роутерный уровень
-router.register_outer_middleware(TracingMW()) # ✅ канонично: outer (до filters handler)
-router.register_inner_middleware(AuthMW())    # ✅ канонично: inner (после filters handler)
-router.middleware(AuditMW())         # ⚠️ DeprecationWarning → используйте .register_outer_middleware()
+router.register_outer_middleware(
+    TracingMW()
+)  # ✅ канонично: outer (до filters handler)
+router.register_inner_middleware(
+    AuthMW()
+)  # ✅ канонично: inner (после filters handler)
+router.middleware(
+    AuditMW()
+)  # ⚠️ DeprecationWarning → используйте .register_outer_middleware()
 ```
 
 **Почему это лучше, чем в aiogram**: в aiogram `router.middleware()` без
@@ -755,6 +795,7 @@ execution order). Причины:
 message_router = Router()
 message_router.register_inner_middleware(MyMW())
 
+
 @message_router.message_created()
 async def handler(event): ...
 ```
@@ -774,9 +815,10 @@ kwargs, которые он реально принимает, ориентир�
 #### 4. ❌ Динамическое построение цепочки — НЕ заимствовать
 
 Aiogram пересобирает middleware-chain на каждое событие через
-`_resolve_middlewares()`. У нас цепочки кешируются при `__ready()` —
-см. п. 3 и п. 9 в `doc/dispatcher_optimization.md`. Это наше осознанное
-преимущество, его нужно сохранить.
+`_resolve_middlewares()`. У нас цепочки кешируются при `__ready()` и
+пересобираются только при перестройке индекса после поздней регистрации
+(#216) — см. п. 3 и п. 9 в `doc/dispatcher_optimization.md`. Это наше
+осознанное преимущество, его нужно сохранить.
 
 #### 5. ✅ Контракт `middleware(handler, event, data)` — уже идентичен
 
@@ -802,7 +844,7 @@ class MyMiddleware(BaseMiddleware):
 | Накопление `data` в цепочке | ✅ Уже есть | Ничего не делать |
 | Сигнатура `(handler, event, data)` | ✅ Уже есть | Ничего не делать |
 | Per-update-type observer (`router.message.middleware`) | ❌ Нет | Решается через отдельные `Router` |
-| Динамическая сборка цепочки на каждое событие | ❌ Нет | У нас лучше: кеш в `__ready` |
+| Динамическая сборка цепочки на каждое событие | ❌ Нет | У нас лучше: кеш в `__ready` плюс пересборка при перестройке индекса после поздней регистрации |
 | Гибрид filter+middleware через `flags` | ❌ Нет | Не вписывается в нашу модель `BaseFilter`/`MagicFilter` |
 
 ### Вывод
@@ -821,7 +863,8 @@ deprecation безымянного `register_middleware()` в пользу эт�
   (`register_middleware()`) вообще не используется в новом коде, у читателя нет
   места для догадок, inner это или outer, и на каком уровне;
 - **горячий путь не трогается**: вся inner-логика выпекается в
-  `handler.mw_chain` при `__ready()`.
+  `handler.mw_chain` при `__ready()` и при перестройке индекса после
+  поздней регистрации.
 
 Заимствование per-observer-архитектуры aiogram
 (`router.message.middleware(...)`) **не оправдано**: это объёмный

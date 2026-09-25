@@ -8,58 +8,82 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'maxapi/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'maxapi/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
+# Права на публикацию нужны только job `deploy`, он их и запрашивает.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
+# На PR отменяем устаревшие прогоны сборки; деплой в Pages идёт в
+# общей группе "pages" и не отменяется.
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: >-
+    ${{ github.event_name == 'pull_request'
+    && format('docs-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10.0.1
         with:
-          version: "latest"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+          version: "latest-known"
 
       - name: Install dependencies
         run: |
-          uv sync --group dev
+          uv sync --group dev --locked
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
+      # --strict: любое предупреждение mkdocs (битая ссылка, потерянный
+      # файл) валит сборку, в том числе на pull_request.
       - name: Build with MkDocs
         run: |
-          uv run mkdocs build
+          uv run --no-sync mkdocs build --strict
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        if: >-
+          ${{ github.event_name != 'pull_request'
+          && github.ref == 'refs/heads/main' }}
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./site
 
   deploy:
+    # environment github-pages ограничен веткой по умолчанию:
+    # workflow_dispatch с другой ветки упал бы на политике environment.
+    if: >-
+      ${{ github.event_name != 'pull_request'
+      && github.ref == 'refs/heads/main' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write     # Публикация артефакта в Pages
+      id-token: write  # OIDC-токен для deploy-pages
     needs: build
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

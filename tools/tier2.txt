@@ -1,3 +1,4 @@
+maxapi/client/ssl.py
 maxapi/connection/base.py
 maxapi/bot.py
 maxapi/types/shortcuts.py

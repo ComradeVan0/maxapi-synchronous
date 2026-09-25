@@ -6,22 +6,30 @@ import os
 import re
 from datetime import datetime
 from io import BytesIO
+from json import loads
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 import backoff
 import puremagic
+from puremagic.main import PureError
 from requests import Response, Session
 from requests.exceptions import ConnectionError
 
 from ..client.ssl import SSLAdapter
 from ..enums.api_path import ApiPath
 from ..exceptions.download_file import DownloadFileError
-from ..exceptions.max import InvalidToken, MaxApiError, MaxConnection
+from ..exceptions.max import (
+    InvalidToken,
+    MaxApiError,
+    MaxConnection,
+    MaxUploadFileFailed,
+)
 from ..loggers import logger_bot
 from ..types.bot_mixin import BotMixin
 from ..utils.runtime import bind_bot
+from ..utils.upload_limits import check_upload_size
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -35,12 +43,22 @@ if TYPE_CHECKING:
 
 DOWNLOAD_CHUNK_SIZE = 65536
 
+#: Максимальная длина тела ответа в тексте исключения.
+ERROR_DETAILS_LIMIT = 512
+
 
 class _RetryableServerError(Exception):
-    """Внутреннее исключение для retry при серверных ошибках."""
+    """Внутреннее исключение для retry при серверных ошибках.
 
-    def __init__(self, status: int) -> None:
+    Attributes:
+        status: HTTP-статус ответа сервера.
+        body: Прочитанное тело ответа. Пустая строка, если тело
+            не читалось или прочитать его не удалось.
+    """
+
+    def __init__(self, status: int, body: str = "") -> None:
         self.status = status
+        self.body = body
         super().__init__(f"Server error {status}")
 
 
@@ -80,6 +98,130 @@ def _on_backoff(details: dict[str, Any]) -> None:
         )
 
 
+def _read_response_text(response: Response) -> str:
+    """Безопасно читает тело ответа и возвращает его как текст.
+
+    Args:
+        response: Ответ requests.
+
+    Returns:
+        str: Тело ответа. Пустая строка, если тело прочитать
+            не удалось.
+    """
+
+    try:
+        return response.text
+    except Exception as e:
+        logger_bot.warning("Не удалось прочитать тело ответа: %s", e)
+        return ""
+
+
+def _read_error_payload(resp: Response) -> dict[str, Any]:
+    """Прочитать тело ошибочного ответа, не падая на не-JSON.
+
+    Args:
+        resp: Ответ, тело которого нужно прочитать.
+
+    Returns:
+        Разобранный JSON-объект, ``{"error": <тело>}`` для остальных
+        форматов или пустой словарь, если тело прочитать не удалось.
+    """
+
+    try:
+        payload = resp.json()
+    except Exception:
+        text = _read_response_text(resp)
+        return {"error": text} if text else {}
+
+    if isinstance(payload, dict):
+        return payload
+    return {"error": payload} if payload is not None else {}
+
+
+def _decode_response_body(text: str) -> str | dict[str, Any]:
+    """Разбирает тело ответа в dict, если это JSON-объект.
+
+    Args:
+        text: Текст тела ответа.
+
+    Returns:
+        str | dict: Разобранный JSON-объект либо исходный текст,
+            если тело пустое или не является JSON-объектом.
+    """
+
+    parsed = _parse_json_object(text)
+
+    return text if parsed is None else parsed
+
+
+def _parse_json_object(text: str) -> dict[str, Any] | None:
+    """Парсит тело ответа как JSON-объект.
+
+    Args:
+        text: Текст тела ответа.
+
+    Returns:
+        dict | None: Разобранный JSON-объект либо None, если тело
+            пустое, не является валидным JSON или не является объектом.
+    """
+
+    if not text.strip():
+        return None
+
+    try:
+        parsed = loads(text)
+    except ValueError:
+        return None
+
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _error_details(raw: dict[str, Any]) -> str:
+    """Отрендерить тело ошибки для текста исключения.
+
+    Не-JSON тело ``_read_error_payload`` кладёт одной строкой под ключ
+    ``error``. Её режем напрямую: ``str(raw)`` на многомегабайтной
+    странице от прокси заново материализовал бы её целиком (да ещё и
+    с экранированием) только ради того, чтобы отбросить всё после
+    ``ERROR_DETAILS_LIMIT``.
+
+    Args:
+        raw: Тело ответа.
+
+    Returns:
+        Диагностика, обрезанная до ``ERROR_DETAILS_LIMIT`` символов.
+    """
+
+    text = raw.get("error")
+    if len(raw) == 1 and isinstance(text, str):
+        details = text
+    else:
+        details = str(raw)
+
+    if len(details) > ERROR_DETAILS_LIMIT:
+        return f"{details[:ERROR_DETAILS_LIMIT]}…"
+    return details
+
+
+def _invalid_token_message(raw: dict[str, Any]) -> str:
+    """Собрать текст ``InvalidToken`` с усечённой диагностикой.
+
+    Args:
+        raw: Тело ответа 401.
+
+    Returns:
+        Сообщение об ошибке; тело обрезается до
+        ``ERROR_DETAILS_LIMIT`` символов, чтобы многомегабайтная
+        страница от прокси не утекла в логи целиком.
+    """
+
+    message = "Неверный токен!"
+    if not raw:
+        return message
+
+    return f"{message} Ответ API: {_error_details(raw)}"
+
+
 class BaseConnection(BotMixin):
     """
     Базовый класс для всех методов API.
@@ -116,7 +258,7 @@ class BaseConnection(BotMixin):
             url: Новый API URL.
         """
 
-        self.api_url = url
+        self.api_url = url.rstrip("/")
 
     def _get_session(self) -> Session:
         """Возвращает активную HTTP-сессию, создавая при необходимости.
@@ -163,15 +305,16 @@ class BaseConnection(BotMixin):
             RuntimeError: Если бот не инициализирован.
             MaxConnection: Ошибка соединения.
             InvalidToken: Ошибка авторизации (401).
-            MaxApiError: Ошибка API (после исчерпания retry).
+            MaxApiError: Ошибка API (после исчерпания retry), а также
+                если успешный ответ не содержит JSON-объекта.
         """
 
         bot = self._ensure_bot()
         conn = bot.default_connection
         retry_statuses = conn.retry_on_statuses
 
-        url = path.value if isinstance(path, ApiPath) else path
-        full_url = self.api_url + url
+        path_str = path.value if isinstance(path, ApiPath) else path
+        url = bot.api_url + path_str
 
         kwargs.setdefault("timeout", conn.timeout)
         kwargs.setdefault("headers", bot.headers)
@@ -186,15 +329,19 @@ class BaseConnection(BotMixin):
         def _do_request() -> Response:
             resp = self._get_session().request(
                 method=method.value,
-                url=full_url,
+                url=url,
                 **kwargs,
             )
 
             if resp.status_code == 401:
-                raise InvalidToken("Неверный токен!")
+                raise InvalidToken(
+                    _invalid_token_message(_read_error_payload(resp))
+                )
 
             if resp.status_code in retry_statuses:
-                raise _RetryableServerError(resp.status_code)
+                raise _RetryableServerError(
+                    resp.status_code, _read_response_text(resp)
+                )
 
             return resp
 
@@ -203,23 +350,67 @@ class BaseConnection(BotMixin):
         except ConnectionError as e:
             raise MaxConnection(f"Ошибка при отправке запроса: {e}") from e
         except _RetryableServerError as e:
-            raise MaxApiError(code=e.status, raw={"error": str(e)}) from e
+            raw = _decode_response_body(e.body)
+            raise MaxApiError(code=e.status, raw=raw) from e
 
-        raw = response.json()
+        text = _read_response_text(response)
 
         if not response.ok:
+            raw = _decode_response_body(text)
             raise MaxApiError(code=response.status_code, raw=raw)
 
-        if is_return_raw:
-            return raw
+        parsed = _parse_json_object(text)
 
-        model = model(**raw)  # type: ignore
+        if parsed is None:
+            # API всегда отвечает JSON-объектом: пустое или не-JSON
+            # тело при 2xx — такой же сбой, как и не-2xx ответ.
+            raise MaxApiError(code=response.status_code, raw=text)
+
+        if is_return_raw:
+            return parsed
+
+        model = model(**parsed)  # type: ignore
 
         return bind_bot(model, bot)
+
+    @staticmethod
+    def _read_upload_response(response: Response) -> str:
+        """
+        Проверяет статус ответа upload-сервера и возвращает его тело.
+
+        Args:
+            response: Ответ upload-сервера.
+
+        Returns:
+            str: Сырой .text ответ от сервера.
+
+        Raises:
+            MaxUploadFileFailed: Если статус ответа не успешный
+                или тело ответа не удалось прочитать.
+        """
+
+        try:
+            text = response.text
+        except Exception as e:
+            raise MaxUploadFileFailed(
+                f"Не удалось прочитать ответ upload-сервера: {e}"
+            ) from e
+
+        # upload-сервер обязан отвечать строго 2xx (3xx — не успех).
+        if not 200 <= response.status_code < 300:
+            raise MaxUploadFileFailed(
+                f"Ошибка при загрузке файла: HTTP {response.status_code}, "
+                f"ответ: {text}"
+            )
+
+        return text
 
     def upload_file(self, url: str, path: str, type: UploadType) -> str:
         """
         Загружает файл на сервер.
+
+        При превышении лимита загрузки MAX пишется предупреждение
+        в логгер `bot`, загрузка не прерывается.
 
         Args:
             url: URL загрузки.
@@ -228,6 +419,9 @@ class BaseConnection(BotMixin):
 
         Returns:
             str: Сырой .text ответ от сервера.
+
+        Raises:
+            MaxUploadFileFailed: Если upload-сервер вернул не-2xx ответ.
         """
 
         with open(path, "rb") as f:
@@ -237,6 +431,8 @@ class BaseConnection(BotMixin):
         basename = path_object.name
         mime_type = mimetypes.guess_type(path)[0] or f"{type.value}/*"
 
+        check_upload_size(len(file_data), type, name=basename)
+
         bot = self._ensure_bot()
 
         response = self._get_session().post(
@@ -244,13 +440,16 @@ class BaseConnection(BotMixin):
             files={"data": (basename, file_data, mime_type)},
             headers=bot.headers,
         )
-        return response.text
+        return self._read_upload_response(response)
 
     def upload_file_buffer(
         self, filename: str, url: str, buffer: bytes, type: UploadType
     ) -> str:
         """
         Загружает файл из буфера.
+
+        При превышении лимита загрузки MAX пишется предупреждение
+        в логгер `bot`, загрузка не прерывается.
 
         Args:
             filename: Имя файла.
@@ -260,7 +459,12 @@ class BaseConnection(BotMixin):
 
         Returns:
             str: Сырой .text ответ от сервера.
+
+        Raises:
+            MaxUploadFileFailed: Если upload-сервер вернул не-2xx ответ.
         """
+
+        check_upload_size(len(buffer), type, name=filename)
 
         try:
             matches = puremagic.magic_string(buffer[:4096])
@@ -270,7 +474,7 @@ class BaseConnection(BotMixin):
             else:
                 mime_type = f"{type.value}/*"
                 ext = ""
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError, AttributeError, PureError):
             mime_type = f"{type.value}/*"
             ext = ""
 
@@ -283,7 +487,7 @@ class BaseConnection(BotMixin):
             files={"data": (basename, buffer, mime_type)},
             headers=bot.headers,
         )
-        return response.text
+        return self._read_upload_response(response)
 
     def _fetch_response(self, url: str) -> Response:
         """

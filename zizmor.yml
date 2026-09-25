@@ -1,0 +1,13 @@
+# Конфигурация zizmor (аудит GitHub Actions workflow), шаг в lint.yml.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # Достаточно тега или SHA; ссылки на ветки запрещены.
+        # Переход на hash-pin — отдельным решением.
+        "*": ref-pin
+  self-repository:
+    ignore:
+      # Reusable workflows подключаются по документированному `./`;
+      # новый синтаксис самоссылки не даёт ничего сверх этого.
+      - publish.yml

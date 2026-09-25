@@ -149,6 +149,7 @@ def test_chat_high_level_shortcuts_delegate_to_bot():
         icon=None,
         title="New title",
         pin=None,
+        description=None,
         notify=None,
     )
     bot.pin_message.assert_called_once_with(
@@ -327,6 +328,7 @@ def test_chat_alias_shortcuts_delegate_to_bot():
         "icon": None,
         "title": "Alias title",
         "pin": None,
+        "description": None,
         "notify": None,
     }
     assert icon_call == {
@@ -334,6 +336,7 @@ def test_chat_alias_shortcuts_delegate_to_bot():
         "icon": icon,
         "title": None,
         "pin": None,
+        "description": None,
         "notify": False,
     }
 
@@ -516,3 +519,39 @@ def test_runtime_should_skip_datetime_like_scalars():
     assert _should_skip(datetime(2026, 1, 1), seen) is True
     assert _should_skip(date(2026, 1, 1), seen) is True
     assert _should_skip(timedelta(seconds=1), seen) is True
+
+
+def test_chat_edit_forwards_description_to_bot():
+    bot = ShortcutBot()
+    chat = Chat(
+        chat_id=100,
+        type=ChatType.CHAT,
+        status=ChatStatus.ACTIVE,
+        last_event_time=1,
+        participants_count=1,
+        is_public=False,
+    )
+    chat.bot = bot
+
+    chat.edit(description="Новое описание")
+    chat.edit(description="")
+
+    set_call = bot.edit_chat.call_args_list[0].kwargs
+    clear_call = bot.edit_chat.call_args_list[1].kwargs
+
+    assert set_call == {
+        "chat_id": 100,
+        "icon": None,
+        "title": None,
+        "pin": None,
+        "description": "Новое описание",
+        "notify": None,
+    }
+    assert clear_call == {
+        "chat_id": 100,
+        "icon": None,
+        "title": None,
+        "pin": None,
+        "description": "",
+        "notify": None,
+    }

@@ -14,13 +14,17 @@ from .methods.add_members_chat import AddMembersChat
 from .methods.change_info import ChangeInfo
 from .methods.delete_bot_from_chat import DeleteMeFromMessage
 from .methods.delete_chat import DeleteChat
+from .methods.delete_comment import DeleteComment
 from .methods.delete_message import DeleteMessage
 from .methods.delete_pin_message import DeletePinMessage
 from .methods.edit_chat import EditChat
+from .methods.edit_comment import EditComment
 from .methods.edit_message import EditMessage
 from .methods.get_chat_by_id import GetChatById
 from .methods.get_chat_by_link import GetChatByLink
 from .methods.get_chats import GetChats
+from .methods.get_comment import GetComment
+from .methods.get_comments import GetComments
 from .methods.get_list_admin_chat import GetListAdminChat
 from .methods.get_me import GetMe
 from .methods.get_me_from_chat import GetMeFromChat
@@ -37,7 +41,9 @@ from .methods.remove_admin import RemoveAdmin
 from .methods.remove_member_chat import RemoveMemberChat
 from .methods.send_action import SendAction
 from .methods.send_callback import SendCallback
+from .methods.send_comment import SendComment
 from .methods.send_message import SendMessage
+from .methods.set_commands import SetCommands
 from .methods.subscribe_webhook import SubscribeWebhook
 from .methods.unsubscribe_webhook import UnsubscribeWebhook
 from .utils.message import process_input_media
@@ -53,8 +59,10 @@ if TYPE_CHECKING:
     from .methods.types.added_members_chat import AddedMembersChat
     from .methods.types.deleted_bot_from_chat import DeletedBotFromChat
     from .methods.types.deleted_chat import DeletedChat
+    from .methods.types.deleted_comment import DeletedComment
     from .methods.types.deleted_message import DeletedMessage
     from .methods.types.deleted_pin_message import DeletedPinMessage
+    from .methods.types.edited_comment import EditedComment
     from .methods.types.edited_message import EditedMessage
     from .methods.types.getted_list_admin_chat import GettedListAdminChat
     from .methods.types.getted_members_chat import GettedMembersChat
@@ -66,7 +74,9 @@ if TYPE_CHECKING:
     from .methods.types.removed_member_chat import RemovedMemberChat
     from .methods.types.sended_action import SendedAction
     from .methods.types.sended_callback import SendedCallback
+    from .methods.types.sended_comment import SendedComment
     from .methods.types.sended_message import SendedMessage
+    from .methods.types.setted_commands import SettedCommands
     from .methods.types.subscribed import Subscribed
     from .methods.types.unsubscribed import Unsubscribed
     from .types.attachments import Attachments
@@ -76,6 +86,7 @@ if TYPE_CHECKING:
     from .types.attachments.video import Video
     from .types.chats import Chat, ChatMember, Chats
     from .types.command import BotCommand
+    from .types.comment import CommentMessage, Comments
     from .types.input_media import InputMedia, InputMediaBuffer
     from .types.message import Message, Messages, NewMessageLink
     from .types.updates.message_callback import MessageForCallback
@@ -523,6 +534,158 @@ class Bot(BaseConnection):
 
         return GetMessage(bot=self, message_id=message_id).fetch()
 
+    def send_comment(
+        self,
+        message_id: str,
+        text: str | None = None,
+        link: NewMessageLink | None = None,
+        format: TextFormat | None = None,
+    ) -> SendedComment:
+        """
+        Отправляет комментарий к посту в канале.
+
+        https://dev.max.ru/docs-api/methods/POST/messages/-messageId-/comments
+
+        Args:
+            message_id: ID поста (mid), к которому относится
+                комментарий.
+            text: Текст комментария.
+            link: Ссылка на комментарий (например, ответ).
+            format: Режим форматирования текста. В комментариях
+                не поддерживаются упоминания и гиперссылки.
+
+        Returns:
+            SendedComment: Отправленный комментарий.
+        """
+
+        return SendComment(
+            bot=self,
+            message_id=message_id,
+            text=text,
+            link=link,
+            format=self.resolve_format(format),
+        ).fetch()
+
+    def edit_comment(
+        self,
+        message_id: str,
+        comment_id: str,
+        text: str | None = None,
+        link: NewMessageLink | None = None,
+        format: TextFormat | None = None,
+    ) -> EditedComment:
+        """
+        Редактирует комментарий к посту в канале.
+
+        https://dev.max.ru/docs-api/methods/PUT/messages/-messageId-/comments
+
+        Args:
+            message_id: ID поста (mid), комментарий к которому
+                нужно отредактировать.
+            comment_id: ID редактируемого комментария.
+            text: Новый текст комментария.
+            link: Ссылка на комментарий (например, ответ).
+            format: Режим форматирования текста. В комментариях
+                не поддерживаются упоминания и гиперссылки.
+
+        Returns:
+            EditedComment: Результат редактирования.
+        """
+
+        return EditComment(
+            bot=self,
+            message_id=message_id,
+            comment_id=comment_id,
+            text=text,
+            link=link,
+            format=self.resolve_format(format),
+        ).fetch()
+
+    def delete_comment(
+        self,
+        message_id: str,
+        comment_id: str,
+    ) -> DeletedComment:
+        """
+        Удаляет комментарий к посту в канале.
+
+        https://dev.max.ru/docs-api/methods/DELETE/messages/-messageId-/comments
+
+        Args:
+            message_id: ID поста (mid), комментарий к которому
+                нужно удалить.
+            comment_id: ID удаляемого комментария.
+
+        Returns:
+            DeletedComment: Результат удаления.
+        """
+
+        return DeleteComment(
+            bot=self,
+            message_id=message_id,
+            comment_id=comment_id,
+        ).fetch()
+
+    def get_comments(
+        self,
+        message_id: str,
+        comment_ids: list[str] | None = None,
+        after: datetime | int | None = None,
+        before: datetime | int | None = None,
+        count: int | None = 50,
+    ) -> Comments:
+        """
+        Получает комментарии к посту в канале.
+
+        https://dev.max.ru/docs-api/methods/GET/messages/-messageId-/comments
+
+        Args:
+            message_id: ID поста (mid), к которому относятся
+                комментарии.
+            comment_ids: ID комментариев, которые нужно получить.
+                Если указан, пагинация игнорируется.
+            after: Начало периода (Unix timestamp в миллисекундах).
+            before: Конец периода (Unix timestamp в миллисекундах).
+            count: Количество комментариев. Если None, параметр
+                не отправляется.
+
+        Returns:
+            Comments: Список комментариев.
+        """
+
+        return GetComments(
+            bot=self,
+            message_id=message_id,
+            comment_ids=comment_ids,
+            after=after,
+            before=before,
+            count=count,
+        ).fetch()
+
+    def get_comment(
+        self,
+        message_id: str,
+        comment_id: str,
+    ) -> CommentMessage:
+        """
+        Получает один комментарий к посту по ID.
+
+        https://dev.max.ru/docs-api/methods/GET/messages/-messageId-/comments/-commentId-
+
+        Args:
+            message_id: ID поста (mid).
+            comment_id: ID комментария.
+
+        Returns:
+            CommentMessage: Объект комментария.
+        """
+
+        return GetComment(
+            bot=self,
+            message_id=message_id,
+            comment_id=comment_id,
+        ).fetch()
+
     def get_me(self) -> User:
         """
         Получает информацию о текущем боте.
@@ -607,8 +770,26 @@ class Bot(BaseConnection):
 
         .. deprecated:: 1.1.0
             Начиная с июня 2026 года метод ``GET /chats`` больше не
-            поддерживается. API не предоставляет готового способа получить
-            список групповых чатов и каналов, в которые добавлен бот.
+            поддерживается. Готового списка чатов API не отдаёт ни
+            через Long Polling, ни через Webhook — его нужно
+            накапливать из событий.
+
+        Рекомендованный сценарий замены — накапливать ``chat_id``
+        самостоятельно:
+
+        1. Получайте события ``bot_added``, ``bot_started``,
+           ``bot_removed`` и ``bot_stopped`` — через Webhook
+           (``bot.subscribe_webhook(url, update_types=[
+           UpdateType.BOT_ADDED, UpdateType.BOT_STARTED,
+           UpdateType.BOT_REMOVED, UpdateType.BOT_STOPPED])``) или
+           опрашивая ``bot.get_updates()`` в собственном цикле.
+        2. Извлекайте ``chat_id`` из входящих событий ``bot_added``
+           и ``bot_started``.
+        3. Храните ``chat_id`` самостоятельно: сохраняйте при
+           получении события, учитывайте возможные дубли и удаляйте
+           по ``bot_removed`` (для диалогов — по ``bot_stopped``).
+        4. Используйте накопленные ``chat_id`` в остальных методах
+           API, например ``bot.send_message()``.
 
         https://dev.max.ru/docs-api/methods/GET/chats
 
@@ -623,10 +804,11 @@ class Bot(BaseConnection):
         """
 
         warnings.warn(
-            "bot.get_chats() устарел: начиная с июня 2026 года "
-            "GET /chats больше не поддерживается. API не предоставляет "
-            "готового способа получить список групповых чатов и каналов, "
-            "в которые добавлен бот.",
+            "bot.get_chats() устарел: начиная с июня 2026 года GET /chats не "
+            "поддерживается — https://dev.max.ru/docs-api/methods/GET/chats. "
+            "Ведите список чатов сами по событиям bot_added, bot_started, "
+            "bot_removed и bot_stopped (Long Polling или "
+            "bot.subscribe_webhook()).",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -635,12 +817,16 @@ class Bot(BaseConnection):
 
     def get_chat_by_link(self, link: str) -> Chat:
         """
-        Получает чат по ссылке.
+        Получает канал по публичной ссылке или алиасу.
+
+        .. deprecated:: 1.2.1
+            Метод удалён из текущей OpenAPI-спецификации API MAX.
+            Использование не рекомендуется.
 
         https://dev.max.ru/docs-api/methods/GET/chats/-chatLink-
 
         Args:
-            link: Ссылка на чат.
+            link: Публичная ссылка или алиас канала.
 
         Returns:
             Chat: Объект чата.
@@ -677,6 +863,7 @@ class Bot(BaseConnection):
         icon: PhotoAttachmentRequestPayload | None = None,
         title: str | None = None,
         pin: str | None = None,
+        description: str | None = None,
         *,
         notify: bool | None = None,
     ) -> Chat:
@@ -690,6 +877,8 @@ class Bot(BaseConnection):
             icon: Иконка.
             title: Новый заголовок (1-200 символов).
             pin: ID сообщения для закрепления.
+            description: Новое описание чата или канала
+                (0-16000 символов). Пустая строка удаляет описание.
             notify: Флаг уведомления.
 
         Returns:
@@ -702,6 +891,7 @@ class Bot(BaseConnection):
             icon=icon,
             title=title,
             pin=pin,
+            description=description,
             notify=self._resolve_notify(notify=notify),
         ).fetch()
 
@@ -725,6 +915,8 @@ class Bot(BaseConnection):
         callback_id: str,
         message: MessageForCallback | None = None,
         notification: str | None = None,
+        *,
+        disable_link_preview: bool | None = None,
     ) -> SendedCallback:
         """
         Отправляет callback ответ.
@@ -735,6 +927,8 @@ class Bot(BaseConnection):
             callback_id: ID callback.
             message: Сообщение для отправки.
             notification: Текст уведомления.
+            disable_link_preview: Отключить превью ссылок
+                (True — без превью).
 
         Returns:
             SendedCallback: Результат отправки callback.
@@ -745,6 +939,9 @@ class Bot(BaseConnection):
             callback_id=callback_id,
             message=message,
             notification=notification,
+            disable_link_preview=self._resolve_disable_link_preview(
+                disable_link_preview=disable_link_preview,
+            ),
         ).fetch()
 
     def pin_message(
@@ -1051,6 +1248,19 @@ class Bot(BaseConnection):
 
         https://dev.max.ru/docs-api/methods/POST/uploads
 
+        Лимиты сервера MAX по типам (форматы / лимиты):
+
+        | Тип | Форматы | Максимум |
+        | --- | --- | --- |
+        | image | JPG/JPEG/PNG/GIF/TIFF/BMP/HEIC | 50 МБ, 7680×7680 px |
+        | video | MP4, MOV, MKV, WEBM | 250 МБ |
+        | audio | MP3, WAV, M4A и др. | 256 МБ, 60 мин |
+        | file | TXT, DOC, PDF и др. | 4 ГБ |
+
+        Для `image` и `audio` оба условия проверяются
+        одновременно. Актуальные значения в коде —
+        `maxapi.utils.upload_limits.UPLOAD_LIMITS`.
+
         Args:
             type: Тип загружаемого файла.
 
@@ -1069,6 +1279,19 @@ class Bot(BaseConnection):
         Упрощает пользовательский сценарий получения token для
         `attachments` без ручного вызова низкоуровневых upload-методов.
 
+        Сервер MAX ограничивает файлы по типу (см.
+        `Bot.get_upload_url` и
+        https://dev.max.ru/docs-api/methods/POST/uploads). Проверка
+        размера выполняется в `upload_file`/`upload_file_buffer`
+        при любой загрузке и лишь предупреждает в логе `bot` при
+        превышении, исключение не выбрасывает — окончательную
+        проверку (включая формат, разрешение изображения и
+        длительность аудио) выполняет сервер MAX и может вернуть
+        ошибку загрузки. `upload_file` читает файл целиком в
+        память перед отправкой, поэтому для больших файлов (лимит
+        сервера для `file` — 4 ГБ) практический потолок ограничен
+        доступной ОЗУ.
+
         Args:
             media: Медиафайл для загрузки.
 
@@ -1082,9 +1305,32 @@ class Bot(BaseConnection):
             att=media,
         )
 
+    def set_commands(self, *commands: BotCommand) -> SettedCommands:
+        """
+        Добавляет, изменяет или удаляет команды бота.
+
+        https://dev.max.ru/docs-api/methods/PATCH/me/commands
+
+        Вызов без аргументов удаляет все команды бота.
+
+        Args:
+            *commands: Команды, которые поддерживает бот
+                (до 32 элементов).
+
+        Returns:
+            SettedCommands: Актуальный список команд бота.
+        """
+
+        return SetCommands(bot=self, commands=list(commands)).fetch()
+
     def set_my_commands(self, *commands: BotCommand) -> User:
         """
         Устанавливает список команд бота.
+
+        .. deprecated:: 1.2.2
+            Метод отправляет запрос на ``PATCH /me``, поддержка
+            которого прекращается 15.09.2026. Используйте
+            :meth:`set_commands`.
 
         Args:
             *commands: Список команд.
@@ -1094,10 +1340,9 @@ class Bot(BaseConnection):
         """
 
         warnings.warn(
-            "bot.set_my_commands() устарел: реализован через "
-            "bot.change_info(), отсутствующий в официальной "
-            "swagger-спецификации API MAX. "
-            "Использование не рекомендуется.",
+            "bot.set_my_commands() отправляет PATCH /me, поддержка "
+            "которого прекращается 15.09.2026. "
+            "Используйте bot.set_commands().",
             DeprecationWarning,
             stacklevel=2,
         )

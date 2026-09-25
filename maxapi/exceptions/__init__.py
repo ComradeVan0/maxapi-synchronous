@@ -1,3 +1,4 @@
+from .base import MaxError
 from .download_file import DownloadFileError, NotAvailableForDownload
 from .max import (
     InvalidToken,
@@ -12,6 +13,7 @@ __all__ = [
     "InvalidToken",
     "MaxApiError",
     "MaxConnection",
+    "MaxError",
     "MaxIconParamsException",
     "MaxUploadFileFailed",
     "NotAvailableForDownload",

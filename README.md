@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/love-apples/maxapi"><img src="logo.png" alt="MaxAPI"></a>
+  <a href="https://github.com/love-apples/maxapi"><img src="https://raw.githubusercontent.com/love-apples/maxapi/main/logo.png" alt="MaxAPI"></a>
 </p>
 
 
@@ -19,7 +19,13 @@
 <a href='https://github.com/love-apples/maxapi/actions/workflows/tests.yml'>
   <img src='https://github.com/love-apples/maxapi/actions/workflows/tests.yml/badge.svg' alt='Tests'></a>
 <a href='https://github.com/love-apples/maxapi/actions/workflows/lint.yml'>
-  <img src='https://github.com/love-apples/maxapi/actions/workflows/lint.yml/badge.svg' alt='Ruff'></a>
+  <img src='https://github.com/love-apples/maxapi/actions/workflows/lint.yml/badge.svg' alt='Lint'></a>
+<a href='https://github.com/love-apples/maxapi/actions/workflows/mypy.yml'>
+  <img src='https://github.com/love-apples/maxapi/actions/workflows/mypy.yml/badge.svg' alt='Mypy'></a>
+<a href='https://github.com/love-apples/maxapi/actions/workflows/package.yml'>
+  <img src='https://github.com/love-apples/maxapi/actions/workflows/package.yml/badge.svg' alt='Package'></a>
+<a href='https://github.com/love-apples/maxapi/actions/workflows/codeql.yml'>
+  <img src='https://github.com/love-apples/maxapi/actions/workflows/codeql.yml/badge.svg' alt='CodeQL'></a>
 <a href='https://github.com/love-apples/maxapi/actions/workflows/docs.yml'>
   <img src='https://github.com/love-apples/maxapi/actions/workflows/docs.yml/badge.svg' alt='Docs'></a>
 <a href='https://github.com/love-apples/maxapi/blob/main/LICENSE'>
@@ -95,13 +101,14 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot()
 dp = Dispatcher()
 
+
 # Ответ бота при нажатии на кнопку "Начать"
 @dp.bot_started()
 async def bot_started(event: BotStarted):
     await bot.send_message(
-        chat_id=event.chat_id,
-        text='Привет! Отправь мне /start'
+        chat_id=event.chat_id, text="Привет! Отправь мне /start"
     )
+
 
 # Ответ бота на команду /start
 @dp.message_created(CommandStart())
@@ -118,7 +125,7 @@ async def main():
     await dp.start_polling(bot)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
 ```
 
@@ -167,12 +174,12 @@ async def hello(event: MessageCreated):
 async def main():
     await dp.handle_webhook(
         bot=bot,
-        host='0.0.0.0',
+        host="0.0.0.0",
         port=8080,
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
 ```
 
@@ -201,11 +208,15 @@ import uvicorn
 from fastapi import FastAPI
 from maxapi.webhook.fastapi import FastAPIMaxWebhook
 
+
 async def main():
     webhook = FastAPIMaxWebhook(dp=dp, bot=bot)
     app = FastAPI(lifespan=webhook.lifespan)
-    webhook.setup(app, path='/webhook')
-    await uvicorn.Server(uvicorn.Config(app, host='0.0.0.0', port=8080)).serve()
+    webhook.setup(app, path="/webhook")
+    await uvicorn.Server(
+        uvicorn.Config(app, host="0.0.0.0", port=8080)
+    ).serve()
+
 
 asyncio.run(main())
 ```
@@ -217,10 +228,26 @@ import asyncio
 import uvicorn
 from maxapi.webhook.litestar import LitestarMaxWebhook
 
+
 async def main():
     webhook = LitestarMaxWebhook(dp=dp, bot=bot)
-    app = webhook.create_app(path='/webhook')
-    await uvicorn.Server(uvicorn.Config(app, host='0.0.0.0', port=8080)).serve()
+    app = webhook.create_app(path="/webhook")
+    await uvicorn.Server(
+        uvicorn.Config(app, host="0.0.0.0", port=8080)
+    ).serve()
+
 
 asyncio.run(main())
 ```
+
+## Разработка и релиз
+
+- Окружение: `uv sync`. Перед PR: `make run-test` (ruff, mypy, pytest) и `make check-ci`
+  (сборка пакета, actionlint, zizmor). Подробности и соглашения — в [AGENTS.md](AGENTS.md).
+- После правки зависимостей в `pyproject.toml` обновите lock: `uv lock`. CI ставит
+  инструменты с `--locked` и упадёт на рассинхроне.
+- Релиз: `uv version --bump patch` (или `minor`/`major`) обновляет версию в `pyproject.toml`
+  и `uv.lock` вместе; после мержа в `main` публикация на PyPI, тег и GitHub Release
+  создаются автоматически, если такой версии на PyPI ещё нет. Если шаг после загрузки
+  на PyPI упал, помогает «Re-run failed jobs» того же run: шаги тега и release
+  идемпотентны. Свежий запуск увидит версию на PyPI и ничего не сделает.

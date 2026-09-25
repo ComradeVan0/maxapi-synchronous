@@ -15,7 +15,11 @@ Async Python SDK + bot-фреймворк для мессенджера **MAX** 
   конфигурацию HTTP-соединения: `default_connection: DefaultConnectionProperties`.
 - `maxapi/client/default.py` — `DefaultConnectionProperties`: настройки aiohttp-клиента (таймауты,
   `max_retries`, `retry_on_statuses`, `retry_backoff_factor`).
-  Передаётся в `Bot(default_connection=DefaultConnectionProperties(...))`.
+  Передаётся в `Bot(default_connection=DefaultConnectionProperties(...))`. Остальные `**kwargs`
+  уходят в `ClientSession` через `client/ssl.py`. **Владение коннектором**: переданный
+  пользователем `connector` — чужой, `with_default_connector`/`connector_kwargs` проставляют ему
+  `connector_owner=False`, поэтому ни `close_session()`, ни временные сессии `upload_file*` его не
+  закрывают. Собственный дефолтный коннектор создаётся под каждую сессию с `connector_owner=True`.
 - `maxapi/methods/<verb>.py` — один класс на эндпоинт (`SendMessage`, `EditChat`, …). Конструктор
   валидирует/нормализует, `async def fetch()` собирает `params`/`json` и вызывает
   `super().request(method=HTTPMethod.X, path=ApiPath.Y, model=<PydanticResponse>, …)`. **Новый
@@ -23,8 +27,11 @@ Async Python SDK + bot-фреймворк для мессенджера **MAX** 
   `methods/send_message.py` как канонический пример (включая retry на `attachment.not.ready`).
 - `maxapi/connection/base.py` — `BaseConnection.request()`: единый HTTP-pipe c `aiohttp`,
   backoff-ретраями серверных 5xx и `ClientConnectionError`, парсингом ответа в pydantic-модель,
-  выбросом `MaxApiError`/`InvalidToken`/`MaxConnection`. `download_file` — потоковое скачивание
-  чанками `DOWNLOAD_CHUNK_SIZE=64KiB`.
+  выбросом `MaxApiError`/`InvalidToken`/`MaxConnection`. Разделяемую сессию `request()` **не
+  закрывает** — её жизненный цикл принадлежит `Bot` (`close_session`); на 401 тело ответа читается
+  в текст `InvalidToken`, уходит в `handle_raw_response` и ответ освобождается через
+  `resp.release()`. Сессия берётся внутри retry-цикла, а не до него. `download_file` — потоковое
+  скачивание чанками `DOWNLOAD_CHUNK_SIZE=64KiB`.
 - `maxapi/dispatcher.py` — `Dispatcher`/`Router` (Router = подкласс Dispatcher). Регистрация через
   `Event`-декораторы (`@dp.message_created(...)`, `@dp.bot_started()` …). `Dispatcher.handle()`
   строит **глобальный outer → роутерный outer → `_check_handler_match` → inner-цепочку (global
@@ -57,7 +64,11 @@ Async Python SDK + bot-фреймворк для мессенджера **MAX** 
 - `maxapi/context/` — `BaseContext` + `MemoryContext` (default, LRU 10_000 в `Dispatcher.contexts`)
   и `RedisContext`. Оба поддерживают `ttl: float | None` — истёкший TTL сбрасывает state и данные;
   реализован через `TTLTracker` (`context/ttl.py`). FSM: `State()` + `StatesGroup` в
-  `state_machine.py` (имя автоматически `"Group:attr"`).
+  `state_machine.py` (имя автоматически `"Group:attr"`). Изоляция событий (`context/isolation.py`,
+  порт из aiogram, MIT-нотис в шапке файла): `Dispatcher(event_isolation=SimpleEventIsolation())`
+  сериализует конкурентные апдейты одного `(chat_id, user_id)` — весь `handle()` идёт под
+  per-key локом; `RedisEventIsolation` — для нескольких процессов. По умолчанию отключена
+  (`DisabledEventIsolation`), как в aiogram.
 - `maxapi/webhook/` — `BaseMaxWebhook` + три бэкенда: `aiohttp.py` (default, в основной
   зависимости), `fastapi.py`, `litestar.py` (опц. экстры `[fastapi]`/`[litestar]`). Все валидируют
   заголовок `X-Max-Bot-Api-Secret`, если в конструктор передан `secret`. Вход parsится
@@ -65,13 +76,27 @@ Async Python SDK + bot-фреймворк для мессенджера **MAX** 
 
 ## Workflows
 
-- Окружение: `uv sync --all-groups` → `source .venv/bin/activate`. Python ≥ 3.10, target — 3.10.
-  Менеджер — **uv**, не pip/poetry.
+- Окружение: `uv sync` (группа `dev` ставится по умолчанию) → `source .venv/bin/activate`.
+  Python ≥ 3.10, target — 3.10.
+  Менеджер — **uv**, не pip/poetry. `uv.lock` коммитится и фиксирует dev-инструменты: lint,
+  mypy и docs в CI ставятся с `--locked`, поэтому после правки `pyproject.toml` обновляйте
+  lock (`uv lock`). Тесты в CI резолвят зависимости заново (`lowest-direct` и `highest`
+  с `--upgrade`), чтобы ловить поломки от новых релизов зависимостей, как у пользователей.
 - **Git — всегда с `--no-pager`** или через перенаправление (`| cat`), чтобы пагинатор не
   подвешивал выполнение: `git --no-pager log`, `git --no-pager diff`, `git --no-pager branch`, и
   т.д.
 - Полная проверка перед PR: `make run-test` — параллельно запускает `ruff check .`,
   `ruff format . --check`, `mypy maxapi`, `pytest -q`. Форматирование — `make format`.
+  `make check-ci` — остальное, что проверяет CI: сборка пакета (`twine check`,
+  `check-wheel-contents`), `actionlint` и `zizmor` по workflow; инструменты — группа `ci`.
+  Обе цели запускают `uv run --locked`: рассинхрон `uv.lock` с `pyproject.toml` валит их,
+  как и CI. Онлайн-аудиты zizmor берут токен из `gh auth token`, если `gh` авторизован.
+- Релиз: `uv version --bump patch|minor|major` меняет версию в `pyproject.toml` и `uv.lock`
+  вместе (ручной bump без `uv lock` уронит гейты на `--locked`). После мержа в `main`
+  `publish.yml` спрашивает PyPI, есть ли такая версия, и если нет — прогоняет гейты,
+  публикует через `uv publish`, создаёт тег и GitHub Release. Если шаг после загрузки на
+  PyPI упал, чинит «Re-run failed jobs» (шаги тега и release идемпотентны); свежий запуск
+  увидит версию на PyPI и корректно ничего не сделает.
 - Тесты: `pytest -q [tests/test_X.py]`. `asyncio_mode = "auto"` — async-тесты не нуждаются в
   декораторах. Маркер `@pytest.mark.integration` автоматически пропускается без `MAX_BOT_TOKEN` в
   env (см. `tests/conftest.py::pytest_collection_modifyitems`). Фикстуры событий —

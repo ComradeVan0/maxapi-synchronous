@@ -27,6 +27,7 @@ class TestUploadFileMimetypesFallback:
         test_file.write_bytes(b"fake-png-data")
 
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.text = '{"token":"t"}'
 
         mock_session = Mock(spec=Session)
@@ -50,6 +51,7 @@ class TestUploadFileMimetypesFallback:
         test_file.write_bytes(b"some-data")
 
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.text = '{"token":"t"}'
 
         mock_session = Mock(spec=Session)
@@ -81,6 +83,7 @@ class TestUploadFileTempSession:
         test_file.write_bytes(b"fake-pdf")
 
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.text = '{"token":"t"}'
 
         conn, _bot = _make_connection_with_bot(session=None)
@@ -107,7 +110,8 @@ class TestUploadFileTempSession:
         test_file.write_bytes(b"data")
 
         mock_response = Mock()
-        mock_response.text = Mock(return_value='{"token":"t"}')
+        mock_response.status_code = 200
+        mock_response.text = '{"token":"t"}'
 
         closed_session = Mock(spec=Session)
         closed_session.closed = True
@@ -134,6 +138,7 @@ class TestUploadFileTempSession:
         test_file.write_bytes(b"jpeg-data")
 
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.text = '{"token":"t"}'
 
         mock_session = Mock(spec=Session)

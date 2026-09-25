@@ -1,0 +1,19 @@
+# Обновления сгруппированы: один PR в неделю на экосистему вместо
+# отдельного PR на каждую зависимость.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-deps:
+        patterns: ["*"]
