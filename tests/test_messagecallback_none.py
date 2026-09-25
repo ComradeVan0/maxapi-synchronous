@@ -30,6 +30,7 @@ class DummyBot:
         callback_id: str,
         message: MessageForCallback,
         notification=None,
+        disable_link_preview=None,
     ):
         self.last = {
             "callback_id": callback_id,

@@ -77,7 +77,7 @@
 ## 2. Списки (источник истины для автоматики)
 
 - **`tools/excluded.txt`** — что удалять одной командой после merge (удалённые из форка файлы + тесты удалённых подсистем + новые несовместимые файлы upstream). Править при появлении новых несовместимостей.
-- **`tools/tier2.txt`** — файлы, поддерживаемые вручную (Tier-2): `connection/base.py`, `bot.py`, `types/shortcuts.py`, `types/chats.py`, `types/fetchable.py`.
+- **`tools/tier2.txt`** — файлы, поддерживаемые вручную (Tier-2): `client/ssl.py`, `connection/base.py`, `bot.py`, `types/shortcuts.py`, `types/chats.py`, `types/fetchable.py`.
 
 ---
 
@@ -148,8 +148,8 @@ Codemod синтаксический — он не понимает семант
 
 ```bash
 # 1. Импорты удалённых модулей (ломают всю импорт-цепочку):
-git grep -nE "from \.\.?context|from \.\.?webhook|from \.dispatcher|StateFilter|ErrorEvent|ExceptionTypeFilter" -- maxapi/ || echo "clean"
-# → нашёл: файл ссылается на удалённую подсистему. Удали файл (если он от удалённой фичи) и добавь путь в tools/excluded.txt.
+git grep -nE "from \.\.?context|from \.\.?webhook|from \.dispatcher|StateFilter|ErrorEvent|ExceptionTypeFilter|logger_dp" -- maxapi/ || echo "clean"
+# → нашёл: файл ссылается на удалённую подсистему. Удали файл (если он от удалённой фичи) и добавь путь в tools/excluded.txt. `logger_dp` → замени на `logger_bot`.
 
 # 2. Остатки async-библиотек (aiohttp/aiofiles/asyncio/ClientSession):
 git grep -nE "aiohttp|aiofiles|TCPConnector|ClientSession|import asyncio|from asyncio" -- maxapi/ || echo "clean"
@@ -197,8 +197,12 @@ git push origin sync/upstream-<YYYY-MM-DD>
 - **`maxapi/__init__.py`**: upstream экспортирует `Dispatcher`/`Router`/`ErrorEvent`/`ExceptionTypeFilter` (всё удалено в sync). Брать `--ours` (экспорты `Bot, F`).
 - **Новые upstream-файлы, импортирующие удалённое ядро**: upstream добавляет `filters/state.py`, `types/error_event.py`, `filters/exception_type.py` — они зависят от удалённого `context`/`dispatcher`. Ловятся Шагом 7 (grep); удалить и добавить в `tools/excluded.txt`.
 - **`ruff`/`mypy` baseline-долг** в `maxapi/` (особенно `connection/base.py`, `send_message.py` — для них `C90` ignore в `pyproject.toml`): это pre-existing, не блокирует. Чистыми должны быть только изменённые файлы.
-- **Тесты upstream async** (`aresponses`/`AsyncMock`/`async def test_`): codemod `aresponses`→`responses` НЕ делает — конверсия вручную/агентом.
-- **`client/ssl.py`** теперь sync (requests `verify=`) — поддерживается вручную; если upstream меняет его async-версию, это Tier-2 конфликт (НЕ excluded).
+- **Тесты upstream async** (`aresponses`/`AsyncMock`/`async def test_`): codemod `aresponses`→`responses` НЕ делает — конверсия вручную/агентом. Мок-паттерн тоже меняется: `AsyncMock`→`MagicMock`, `await_args`→`call_args`, `await X()`→`X()`. Из-за новой обработки ответов в `request()` моки ответов задают `resp.text` (сырой текст, вместо `resp.json()`), а моки upload-ответов — ещё и `resp.status_code`.
+- **`client/ssl.py`** — sync (requests `SSLAdapter`), поддерживается вручную и ДОЛЖЕН быть в `tier2.txt` (иначе Шаг 4 заберёт `--theirs` = async-версию с aiohttp). Синхронизация 2026-09-25 поймала этот кейс: слёт `import aiohttp` → лечится `git checkout HEAD -- maxapi/client/ssl.py`.
+- **`logger_dp`** (диспетчерский логгер) в Tier-1 файлах вроде `methods/types/getted_updates.py`: в sync его нет (только `logger_bot`/`logger_connection`), sweep 7 его не ловит. Заменять на `logger_bot`.
+- **`from asyncio.exceptions import TimeoutError`** (`utils/updates.py`): codemod импорты не трогает. В sync таймаут уже покрыт `MaxConnection` — импорт убрать, `except (MaxConnection, AsyncioTimeoutError)` → `except MaxConnection`.
+- **`%s`→`%r` в логах `updates.py`**: upstream поменял `get_chat_member: %s` на `%r`; наш sync-тест ждёт `%s`. Вернуть `%s`. При этом try/except вокруг `get_chat_by_id` в `_resolve_chat` (обработка `MaxApiError`/`MaxConnection`) — реальный фикс, его оставить.
+- **`ChatActionLoop`/`Chat.typing()`** в `types/shortcuts.py`: async-only (`asyncio.Event`/`create_task`) — в sync НЕ портируем.
 
 ---
 

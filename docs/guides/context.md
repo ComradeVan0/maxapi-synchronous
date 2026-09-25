@@ -8,20 +8,24 @@
 from maxapi.context import MemoryContext, StatesGroup, State
 from maxapi.types import MessageCreated, Command
 
+
 class Form(StatesGroup):
     name = State()
     age = State()
 
-@dp.message_created(Command('start'))
+
+@dp.message_created(Command("start"))
 async def start_handler(event: MessageCreated, context: MemoryContext):
     await context.set_state(Form.name)
     await event.message.answer("Как вас зовут?")
+
 
 @dp.message_created(Form.name)
 async def name_handler(event: MessageCreated, context: MemoryContext):
     await context.update_data(name=event.message.body.text)
     await context.set_state(Form.age)
     await event.message.answer("Сколько вам лет?")
+
 
 @dp.message_created(Form.age)
 async def age_handler(event: MessageCreated, context: MemoryContext):
@@ -111,7 +115,7 @@ dp = Dispatcher(
 ```python
 class Form(StatesGroup):
     name = State()  # Автоматически получит имя 'Form:name'
-    age = State()   # Автоматически получит имя 'Form:age'
+    age = State()  # Автоматически получит имя 'Form:age'
 ```
 
 ## Фильтрация по состояниям
@@ -121,18 +125,17 @@ class Form(StatesGroup):
 ```python
 # Только в состоянии Form.name
 @dp.message_created(Form.name)
-async def name_handler(event: MessageCreated, context: MemoryContext):
-    ...
+async def name_handler(event: MessageCreated, context: MemoryContext): ...
+
 
 # Только когда НЕТ активного состояния
 @dp.message_created(None)
-async def no_state_handler(event: MessageCreated):
-    ...
+async def no_state_handler(event: MessageCreated): ...
+
 
 # В любом из перечисленных состояний
 @dp.message_created(Form.name, Form.age)
-async def multi_state_handler(event: MessageCreated):
-    ...
+async def multi_state_handler(event: MessageCreated): ...
 ```
 
 ## Хранение в Redis
@@ -153,13 +156,13 @@ from maxapi import Dispatcher
 from maxapi.context import RedisContext
 
 # Инициализация клиента Redis
-redis_client = redis.Redis(host='localhost', port=6379, db=0)
+redis_client = redis.Redis(host="localhost", port=6379, db=0)
 
 # Передача RedisContext в Диспетчер
 dp = Dispatcher(
     storage=RedisContext,
     redis_client=redis_client,
-    key_prefix="my_bot"
+    key_prefix="my_bot",
 )
 ```
 
@@ -223,6 +226,7 @@ bot = Bot()
 dp = Dispatcher()
 dp.register_outer_middleware(SaveMarkerMiddleware())
 
+
 async def main() -> None:
     marker = await load_marker()  # str | None
 
@@ -236,3 +240,89 @@ asyncio.run(main())
 ```
 
 - во время работы middleware будет обновлять сохранённый маркер на основании `event_object.bot.marker_updates`.
+
+!!! note "Какой именно маркер видит middleware"
+
+    `bot.marker_updates` сдвигается **после** того, как пачка событий
+    полностью разобрана и передана в обработчики. Middleware выполняется
+    во время обработки пачки, то есть видит маркер **предыдущей**,
+    уже зафиксированной пачки — не той, событие которой обрабатывает
+    прямо сейчас.
+
+    Это сделано намеренно: маркер, сохранённый до завершения пачки,
+    означал бы, что при падении посреди обработки её события уже
+    считаются доставленными и API больше их не отдаст. Поэтому
+    персистентность здесь — **at-least-once**: после перезапуска
+    незавершённая пачка приедет заново, и её события обработаются
+    повторно.
+
+    Практические следствия:
+
+    - обработчики должны быть идемпотентны — повторная обработка
+      события после перезапуска штатна, а не аварийна;
+    - маркер самой последней пачки в Redis не попадёт: после неё
+      уже не приходит событий, которые запустили бы middleware.
+      После перезапуска эта пачка будет обработана ещё раз.
+
+    Если повторная обработка недопустима, сохраняйте не маркер, а
+    признак обработки конкретного события (по его идентификатору) и
+    проверяйте его в начале обработчика.
+
+## Изоляция событий (защита от гонок FSM)
+
+При параллельной обработке событий (`Dispatcher(use_create_task=True)` или вебхук)
+два быстрых сообщения одного пользователя могут прочитать **один и тот же снимок
+FSM-состояния** до того, как первый хендлер успеет его сбросить. В результате
+одноразовый шаг FSM (например, «введите сумму перевода») выполнится дважды.
+
+Механизм изоляции сериализует обработку апдейтов одного пользователя: пока не
+завершился предыдущий `handle()` для ключа `(chat_id, user_id)`, следующий ждёт.
+События разных пользователей обрабатываются параллельно, как и раньше.
+
+По умолчанию изоляция **отключена** (как в aiogram). Включение:
+
+```python
+from maxapi import Dispatcher
+from maxapi.context import SimpleEventIsolation
+
+dp = Dispatcher(
+    use_create_task=True,
+    event_isolation=SimpleEventIsolation(),
+)
+```
+
+Ключ изоляции совпадает с ключом FSM-контекста — `(chat_id, user_id)` из
+`event.get_ids()`. События, у которых часть идентификаторов отсутствует
+(например, апдейты без `user_id` в групповых чатах), делят один контекст —
+и сериализуются вместе, ровно на той гранулярности, на которой они делят
+состояние.
+
+### Изоляция при нескольких процессах
+
+`SimpleEventIsolation` работает в пределах одного процесса. Если бот запущен в
+нескольких процессах или инстансах (например, вебхук за балансировщиком),
+используйте `RedisEventIsolation` в паре с `RedisContext`:
+
+```python
+import redis.asyncio as redis
+from maxapi import Dispatcher
+from maxapi.context import RedisContext, RedisEventIsolation
+
+redis_client = redis.Redis(host="localhost", port=6379, db=0)
+
+dp = Dispatcher(
+    storage=RedisContext,
+    redis_client=redis_client,
+    key_prefix="my_bot",
+    event_isolation=RedisEventIsolation(
+        redis_client,
+        key_prefix="my_bot",
+    ),
+)
+```
+
+!!! warning "Долгие хендлеры"
+    Блокировка удерживается на всё время обработки события. Если хендлер внутри
+    себя ожидает **следующее событие того же пользователя**, при включённой
+    изоляции это приведёт к взаимной блокировке до конца хендлера
+    (у `RedisEventIsolation` — до `lock_timeout`, по умолчанию 60 секунд).

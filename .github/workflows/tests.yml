@@ -2,57 +2,111 @@ name: Tests
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      MAX_BOT_TOKEN:
+        required: false
+      TEST_CHAT_ID:
+        required: false
+      CODECOV_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+# Отменяем только устаревшие прогоны PR; на push и при вызове из
+# publish.yml группа по SHA, чтобы релизные прогоны не вставали в
+# очередь друг за другом и не отменяли друг друга.
+# Инфикс `-tests-` обязателен: при вызове через `uses:` из
+# publish.yml `github.workflow` резолвится в имя ВЫЗЫВАЮЩЕГО workflow,
+# и без инфикса все четыре гейта попали бы в одну группу и встали бы
+# в очередь друг за другом.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-tests-${{ github.event_name == 'pull_request'
+    && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      # Матрица совместимости: при падении одной ячейки остальные
+      # дорабатывают, чтобы видеть все сломанные комбинации сразу.
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         dependency-resolution: ["lowest-direct", "highest"]
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
+      # python-version выставляет UV_PYTHON и перебивает закоммиченный
+      # .python-version (3.10), из-за которого раньше все ноги матрицы
+      # фактически выполнялись на 3.10. cache-suffix разводит ключи
+      # кеша по резолюции, иначе все ячейки делят один ключ.
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10.0.1
         with:
-          version: "latest"
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
+          version: "latest-known"
           python-version: ${{ matrix.python-version }}
+          cache-suffix: ${{ matrix.dependency-resolution }}
 
       - name: Install dependencies with ${{ matrix.dependency-resolution }} resolution
+        env:
+          RESOLUTION: ${{ matrix.dependency-resolution }}
         run: |
-          uv sync --all-groups --resolution ${{ matrix.dependency-resolution }}
+          # Это библиотека: пользователи ставят её свежей резолюцией,
+          # а не нашим uv.lock. Поэтому обе ноги матрицы резолвят
+          # зависимости заново при каждом запуске (--upgrade игнорирует
+          # lock): `highest` ловит поломку от нового релиза зависимости
+          # сразу, а не через неделю в PR Dependabot; `lowest-direct`
+          # проверяет заявленные нижние границы. Lock-файл фиксирует
+          # только инструменты (lint, mypy, docs ставятся с --locked).
+          uv sync --group dev --resolution "$RESOLUTION" --upgrade
 
+      # --no-sync обязателен: без него `uv run` молча приводит окружение
+      # к uv.lock и подменяет установленную выше резолюцию версиями
+      # из lock-файла — нога lowest-direct перестаёт что-либо проверять.
       - name: Run unit tests
         run: |
-          uv run pytest tests/ -v -m "not integration" --cov=maxapi --cov-report=xml --cov-report=term
+          uv run --no-sync pytest tests/ -v -m "not integration" \
+            --cov=maxapi --cov-report=xml --cov-report=term
 
+      # Один общий токен бота: гоняем на одной ноге, иначе десять
+      # параллельных прогонов упираются в лимиты реального API.
       - name: Run integration tests
+        if: >-
+          ${{ matrix.python-version == '3.11'
+          && matrix.dependency-resolution == 'highest' }}
         env:
           MAX_BOT_TOKEN: ${{ secrets.MAX_BOT_TOKEN }}
           TEST_CHAT_ID: ${{ secrets.TEST_CHAT_ID }}
         run: |
           if [ -n "$MAX_BOT_TOKEN" ]; then
-            uv run pytest tests/ -v -m integration
+            uv run --no-sync pytest tests/ -v -m integration
           else
             echo "MAX_BOT_TOKEN не установлен, пропускаем интеграционные тесты"
           fi
 
+      # Токен убирает флаки tokenless-загрузки; в PR из форков секрета
+      # нет, и action сам откатывается на tokenless для public repo.
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.11'
-        uses: codecov/codecov-action@v4
+        if: >-
+          ${{ matrix.python-version == '3.11'
+          && matrix.dependency-resolution == 'highest' }}
+        uses: codecov/codecov-action@v7
         with:
-          file: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          disable_search: true
           fail_ci_if_error: false
           flags: unittests
           name: codecov-umbrella

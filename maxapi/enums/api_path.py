@@ -12,8 +12,10 @@ class ApiPath(StrEnum):
     """
 
     ME = "/me"
+    COMMANDS = "/commands"
     CHATS = "/chats"
     MESSAGES = "/messages"
+    COMMENTS = "/comments"
     UPDATES = "/updates"
     VIDEOS = "/videos"
     ANSWERS = "/answers"
